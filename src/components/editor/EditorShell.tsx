@@ -100,6 +100,7 @@ export function EditorShell({
   // MIDI Fallback State (Phase 19)
   const [midiBase64, setMidiBase64] = useState<string | null>(null);
   const [midiStartOffsetMs, setMidiStartOffsetMs] = useState(0);
+  const [midiDurationMs, setMidiDurationMs] = useState(0);
   const midiPlayerRef = useRef<any>(null);
   const midiTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -112,13 +113,17 @@ export function EditorShell({
       for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
       const midi = new Midi(bytes);
       let minMs = Infinity;
+      let maxMs = 0;
       midi.tracks.forEach(t => t.notes.forEach(n => {
         if (n.time * 1000 < minMs) minMs = n.time * 1000;
+        if ((n.time + n.duration) * 1000 > maxMs) maxMs = (n.time + n.duration) * 1000;
       }));
       setMidiStartOffsetMs(minMs === Infinity ? 0 : minMs);
+      setMidiDurationMs(maxMs);
     } catch (err) {
       console.error("Failed to parse initial MIDI offset", err);
       setMidiStartOffsetMs(0);
+      setMidiDurationMs(0);
     }
   }, []);
 
@@ -342,6 +347,27 @@ export function EditorShell({
   const isPlayingRef = useRef(isPlaying);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
+  // Calculate Global Maximum Song Duration
+  const totalSongDurationMs = useMemo(() => {
+    let maxAudio = durationMs || 0;
+    let maxMidi = midiDurationMs || 0;
+    
+    let maxTimemap = 0;
+    const timemap = payload.notationData?.timemap;
+    if (timemap && timemap.length > 0) {
+       const lastMap = timemap[timemap.length - 1];
+       const bpm = payload.metadata?.tempo || 120;
+       const ts = payload.metadata?.timeSignature || "4/4";
+       const [numStr, denStr] = ts.split("/");
+       const beatsPerMeasure = parseInt(numStr, 10) || 4;
+       const noteValue = parseInt(denStr, 10) || 4;
+       const measureMs = (60 * 1000 / bpm) * (4 / noteValue) * beatsPerMeasure;
+       maxTimemap = lastMap.timeMs + measureMs;
+    }
+    const finalMax = Math.max(maxAudio, maxMidi, maxTimemap);
+    return finalMax > 0 ? finalMax : 0;
+  }, [durationMs, midiDurationMs, payload.notationData?.timemap, payload.metadata?.tempo, payload.metadata?.timeSignature]);
+
   // Playback Loop for UI
   const updatePosition = useCallback(() => {
     if (!isPlayingRef.current) return;
@@ -355,6 +381,20 @@ export function EditorShell({
       currentPos = audioManagerRef.current.getCurrentPositionMs();
     }
 
+    // Auto-Stop Tripwire
+    if (totalSongDurationMs > 0 && currentPos > totalSongDurationMs) {
+      setIsPlaying(false);
+      if (midiPlayerRef.current) {
+        midiPlayerRef.current.stop();
+        midiPlayerRef.current.currentTime = 0;
+      }
+      if (audioManagerRef.current) {
+        audioManagerRef.current.stop();
+      }
+      setPositionMs(0);
+      return;
+    }
+
     setPositionMs(prev => {
       const roundedPos = Math.round(currentPos);
       if (Math.abs(prev - roundedPos) < 16) return prev;
@@ -362,7 +402,7 @@ export function EditorShell({
     });
 
     requestRef.current = requestAnimationFrame(updatePosition);
-  }, [payload.audioTracks.length]);
+  }, [payload.audioTracks.length, totalSongDurationMs]);
 
   useEffect(() => {
     if (isPlaying) {
@@ -926,7 +966,7 @@ export function EditorShell({
               keySignature={payload.metadata?.keySignature || "C Maj"}
               onKeySignatureChange={onPayloadChange ? handleKeySignatureChange : undefined}
               positionMs={positionMs}
-              durationMs={durationMs}
+              durationMs={totalSongDurationMs}
               isPlaying={isPlaying}
               loop={loopState}
               onLoopChange={onPayloadChange ? handleLoopChange : undefined}
