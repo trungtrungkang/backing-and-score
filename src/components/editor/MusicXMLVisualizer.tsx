@@ -1,0 +1,539 @@
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+import { cn, fetchWithRetry } from "@/lib/utils";
+import { VerovioWorkerProxy, type IVerovioWorkerProxy } from "@/lib/verovio/worker-proxy";
+import { getFileViewUrl } from "@/lib/appwrite";
+import { Loader2, ZoomIn, ZoomOut } from "lucide-react";
+
+export interface MusicXMLVisualizerProps {
+  scoreFileId?: string;
+  positionMs?: number;
+  isPlaying?: boolean;
+  timemap?: { measure: number; timeMs: number }[];
+  measureMap?: Record<number, number>;
+  onSeek?: (positionMs: number) => void;
+  onMidiExtracted?: (midiBase64: string) => void;
+  isDarkMode?: boolean;
+  className?: string;
+}
+
+// Utility to resolve a latent playback measure to a physical printed measure.
+// measureMap acts as anchor points. Offsets are interpolated until the next anchor.
+function getPhysicalMeasure(latent: number, measureMap?: Record<number, number>): number {
+  if (!measureMap) return latent;
+
+  let bestLatentAnchor = -1;
+  for (const k of Object.keys(measureMap)) {
+    const keyNum = Number(k);
+    if (!isNaN(keyNum) && keyNum <= latent && keyNum > bestLatentAnchor) {
+      bestLatentAnchor = keyNum;
+    }
+  }
+
+  if (bestLatentAnchor === -1) return latent;
+
+  const offset = latent - bestLatentAnchor;
+  return measureMap[bestLatentAnchor] + offset;
+}
+
+export function MusicXMLVisualizer({ scoreFileId, positionMs = 0, isPlaying = false, timemap = [], measureMap, onSeek, onMidiExtracted, isDarkMode = false, className }: MusicXMLVisualizerProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [renderVersion, setRenderVersion] = useState(0); // increments when SVG is updated
+  const svgContentRef = useRef<string | null>(null); // holds raw SVG string
+  const svgContainerRef = useRef<HTMLDivElement | null>(null); // DOM node for SVG
+  const workerProxyRef = useRef<IVerovioWorkerProxy | null>(null);
+
+  // Custom DOM refs for playhead
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playheadRef = useRef<HTMLDivElement>(null);
+  const measuresCacheRef = useRef<NodeListOf<Element> | null>(null);
+  const [scale, setScale] = useState(40);
+
+  // Load saved zoom level for this score
+  useEffect(() => {
+    if (!scoreFileId) return;
+    // Default to "Zoom In 3x" (40 + 3*10 = 70) for Tablet/Desktop
+    if (window.innerWidth >= 768) {
+      setScale(70);
+    }
+  }, [scoreFileId]);
+
+  // Initialize Worker once
+  useEffect(() => {
+    if (workerProxyRef.current) return;
+
+    // Use the copied verovio-worker.js from the public directory
+    const workerUrl = "/dist/verovio/verovio-worker.js";
+    const worker = new Worker(workerUrl);
+
+    // Tell the worker where to load the wasm toolkit from
+    worker.postMessage({
+      verovioUrl: "https://www.verovio.org/javascript/latest/verovio-toolkit-wasm.js"
+    });
+
+    const proxy = new VerovioWorkerProxy(worker) as unknown as IVerovioWorkerProxy;
+    workerProxyRef.current = proxy;
+
+    // Cleanup worker on unmount
+    return () => {
+      worker.terminate();
+      workerProxyRef.current = null;
+    };
+  }, []);
+
+  // Fetch score and load into Verovio
+  useEffect(() => {
+    if (!scoreFileId || !workerProxyRef.current) return;
+
+    let canceled = false;
+    const loadScore = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const url = getFileViewUrl(scoreFileId);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (canceled) return;
+
+        const proxy = workerProxyRef.current;
+        if (!proxy) return;
+
+        // Wait for verovio runtime to be ready
+        await proxy.onRuntimeInitialized();
+        if (canceled) return;
+
+        // Use verovio-editor's responsive pattern:
+        // pageWidth = container.clientWidth * (100 / scale)
+        // This makes Verovio output an SVG that already matches the container.
+        const containerWidth = svgContainerRef.current?.clientWidth ?? 800;
+        await proxy.setOptions({
+          pageHeight: 60000, // very tall virtual page — all measures on one page
+          pageWidth: Math.round(containerWidth * (100 / scale)),
+          pageMarginLeft: 50,
+          pageMarginRight: 50,
+          pageMarginTop: 50,
+          pageMarginBottom: 50,
+          scale: scale,
+          adjustPageHeight: true,
+          breaks: "auto",
+        });
+        if (canceled) return;
+
+        // Load data into toolkit
+        await proxy.loadData(text);
+        if (canceled) return;
+
+        // Render the single continuous page SVG (Verovio is configured with auto breaks and adjusted height)
+        const svg = await proxy.renderToSVG(1);
+        if (canceled) return;
+
+        // Render to MIDI
+        const midiStr = await proxy.renderToMIDI();
+        if (onMidiExtracted && midiStr) {
+          onMidiExtracted('data:audio/midi;base64,' + midiStr);
+        }
+        if (canceled) return;
+
+        svgContentRef.current = svg;
+        setRenderVersion(v => v + 1); // signal that SVG is ready to be written to DOM
+      } catch (e: any) {
+        if (!canceled) setError(e.message ?? "Unknown error loading score");
+      } finally {
+        if (!canceled) setLoading(false);
+      }
+    };
+
+    loadScore();
+    return () => {
+      canceled = true;
+    };
+  }, [scoreFileId, scale]);
+
+  // Write SVG string directly to DOM via ref (bypasses React reconciliation)
+  // This ensures React never wipes CSS classes we add to SVG elements.
+  useEffect(() => {
+    if (!svgContainerRef.current || !svgContentRef.current) return;
+    svgContainerRef.current.innerHTML = svgContentRef.current;
+    // IMPORTANT: 'height: auto' on SVG requires a viewBox to compute proportional height.
+    // Without viewBox, browsers default SVG height to 150px regardless of content.
+    const topSvg = svgContainerRef.current.querySelector(':scope > svg') as SVGSVGElement | null;
+    if (topSvg) {
+      let w = parseFloat(topSvg.getAttribute('width') ?? '0');
+      let h = parseFloat(topSvg.getAttribute('height') ?? '0');
+      // Fallback: derive from definition-scale viewBox if outer SVG lacks height
+      if (h <= 0 || isNaN(h)) {
+        const defVb = topSvg.querySelector('.definition-scale')?.getAttribute('viewBox');
+        if (defVb) {
+          const parts = defVb.split(/\s+/).map(Number);
+          // outer SVG coords are 1/10 of definition-scale units
+          if (parts.length === 4) { w = parts[2] / 10; h = parts[3] / 10; }
+        }
+      }
+      if (w > 0 && h > 0) topSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      topSvg.removeAttribute('width');
+      topSvg.removeAttribute('height');
+      topSvg.style.display = 'block';
+      topSvg.style.width = '100%';
+      topSvg.style.height = 'auto';
+    }
+  }, [renderVersion]);
+
+  // --- Magic Sync: Highlight & Auto-scroll ---
+  const activeMeasureRef = useRef<number | null>(null);
+  const scrollTargetRef = useRef<Element | null>(null);
+
+  const highlightMeasure = (measureEl: Element | null, shouldScroll: boolean) => {
+    const container = svgContainerRef.current;
+    if (!container) return;
+    container.querySelectorAll(".active-measure").forEach(el => el.classList.remove("active-measure"));
+
+    if (measureEl) {
+      measureEl.classList.add("active-measure");
+      if (shouldScroll) {
+        const systemEl = measureEl.closest('.system');
+        const targetEl = systemEl || measureEl;
+
+        if (targetEl !== scrollTargetRef.current) {
+          scrollTargetRef.current = targetEl;
+
+          // Safari's targetEl.scrollIntoView() fails on SVG <g> elements because it internally
+          // relies on getBoundingClientRect(), which returns zeros for SVGs with <use> tags in WebKit.
+          // FIX: Calculate scroll target natively via getBBox() and getScreenCTM().
+          const scrollContainerNode = containerRef.current;
+          if (scrollContainerNode && targetEl instanceof SVGGraphicsElement) {
+            try {
+              const bbox = targetEl.getBBox();
+              const ctm = targetEl.getScreenCTM();
+              if (ctm) {
+                const screenTop = bbox.x * ctm.b + bbox.y * ctm.d + ctm.f;
+                const scrollContainerRect = scrollContainerNode.getBoundingClientRect();
+                const scrollTop = scrollContainerNode.scrollTop || 0;
+
+                // absoluteY is the distance from the top of the scrollable content
+                const absoluteY = (screenTop - scrollContainerRect.top) + scrollTop;
+
+                // Target scroll offset: center the system vertically in the viewport
+                // We subtract a little extra to account for empty margins or fixed headers
+                const targetScrollTop = absoluteY - (scrollContainerNode.clientHeight / 2) + (bbox.height * ctm.d / 2);
+
+                scrollContainerNode.scrollTo({
+                  top: targetScrollTop,
+                  behavior: 'smooth'
+                });
+                return;
+              }
+            } catch (e) {
+              console.warn("Manual SVG scrolling failed", e);
+            }
+          }
+
+          // Fallback for browsers where getBBox might fail or targetEl is HTML
+          targetEl.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        }
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (renderVersion === 0) return;
+    activeMeasureRef.current = null;
+    scrollTargetRef.current = null;
+    measuresCacheRef.current = svgContainerRef.current?.querySelectorAll('.definition-scale .measure') || null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderVersion, timemap]);
+
+  // Playback position -> active measure highlight & SMOOTH PLAYHEAD
+  useEffect(() => {
+    if (!timemap || timemap.length === 0 || renderVersion === 0) return;
+
+    let currentEvent: { measure: number, timeMs: number } | null = null;
+    let nextEvent: { measure: number, timeMs: number } | null = null;
+
+    for (let i = 0; i < timemap.length; i++) {
+      if (positionMs >= timemap[i].timeMs) {
+        currentEvent = timemap[i];
+      } else {
+        nextEvent = timemap[i];
+        break;
+      }
+    }
+
+    const container = svgContainerRef.current;
+    const playhead = playheadRef.current;
+
+    if (currentEvent && container && playhead && measuresCacheRef.current) {
+      // Calculate interpolation progress (0.0 to 1.0) inside the current measure
+      let progress = 0;
+      if (nextEvent) {
+        const duration = nextEvent.timeMs - currentEvent.timeMs;
+        if (duration > 0) {
+          progress = Math.max(0, Math.min(1, (positionMs - currentEvent.timeMs) / duration));
+        }
+      }
+
+      const physicalIndex = getPhysicalMeasure(currentEvent.measure, measureMap);
+      const measureEl = measuresCacheRef.current[physicalIndex - 1] as SVGGElement | undefined;
+
+      if (measureEl) {
+        // Highlight active entire measure box
+        if (currentEvent.measure !== activeMeasureRef.current) {
+          activeMeasureRef.current = currentEvent.measure;
+          highlightMeasure(measureEl, isPlaying);
+        }
+
+        // --- SAFARI-SAFE GET_BOUNDING_CLIENT_RECT ---
+        // Safari has a bug where getBoundingClientRect() on <g> returns 0 if it contains <use> tags.
+        // We use getBBox() and getScreenCTM() to manually compute the screen rect.
+        const bbox = measureEl.getBBox();
+        const ctm = measureEl.getScreenCTM();
+        if (!ctm) return;
+
+        // Calculate actual screen coordinates
+        const screenLeft = bbox.x * ctm.a + bbox.y * ctm.c + ctm.e;
+        const screenTop = bbox.x * ctm.b + bbox.y * ctm.d + ctm.f;
+        const screenWidth = bbox.width * ctm.a;
+        const screenHeight = bbox.height * ctm.d;
+
+        const scrollContainerNode = containerRef.current;
+        if (!scrollContainerNode) return;
+
+        const scrollContainerRect = scrollContainerNode.getBoundingClientRect();
+        const scrollLeft = scrollContainerNode.scrollLeft || 0;
+        const scrollTop = scrollContainerNode.scrollTop || 0;
+
+        const startX = (screenLeft - scrollContainerRect.left) + scrollLeft;
+        const absoluteY = (screenTop - scrollContainerRect.top) + scrollTop;
+
+        // Calculate true width by interpolating to the next measure's left edge
+        let trueWidth = screenWidth;
+        if (nextEvent) {
+          const nextPhysicalIndex = getPhysicalMeasure(nextEvent.measure, measureMap);
+          const nextMeasureEl = measuresCacheRef.current[nextPhysicalIndex - 1] as SVGGElement | undefined;
+          if (nextMeasureEl) {
+            const nextBbox = nextMeasureEl.getBBox();
+            const nextCtm = nextMeasureEl.getScreenCTM();
+            if (nextCtm) {
+              const nextScreenLeft = nextBbox.x * nextCtm.a + nextBbox.y * nextCtm.c + nextCtm.e;
+              const nextScreenTop = nextBbox.x * nextCtm.b + nextBbox.y * nextCtm.d + nextCtm.f;
+
+              // Only use next measure's left if it's on the same staff system
+              if (Math.abs(nextScreenTop - screenTop) < 50 && nextScreenLeft > screenLeft) {
+                trueWidth = nextScreenLeft - screenLeft;
+              }
+            }
+          }
+        }
+
+        // Apply interpolation
+        const playheadX = startX + (trueWidth * progress);
+        const playheadY = absoluteY;
+
+        playhead.style.transform = `translate(${playheadX}px, ${playheadY}px)`;
+        playhead.style.height = `${screenHeight}px`;
+        playhead.style.opacity = '1';
+      } else {
+        playhead.style.opacity = '0';
+      }
+    } else {
+      if (playheadRef.current) playheadRef.current.style.opacity = '0';
+      highlightMeasure(null, false);
+      activeMeasureRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionMs, isPlaying, timemap, measureMap, renderVersion]);
+
+  // Handle clicking on measures to seek
+  const handleSvgClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onSeek || !timemap || timemap.length === 0) return;
+
+    // Find closest .measure group
+    const target = e.target as Element;
+    const measureEl = target.closest('.measure');
+    if (!measureEl) return;
+
+    // Find the 1-based index of the clicked measure among all measures
+    const container = svgContainerRef.current;
+    if (!container) return;
+    const allMeasures = Array.from(container.querySelectorAll('.definition-scale .measure'));
+    const index = allMeasures.indexOf(measureEl as Element);
+    if (index === -1) return;
+
+    const clickedPhysicalMeasure = index + 1;
+
+    // Find all latent measures that map to this physical measure
+    // We scan all measures in the timemap to resolve their physical mapping
+    const candidateLatents: number[] = [];
+    for (const entry of timemap) {
+      if (getPhysicalMeasure(entry.measure, measureMap) === clickedPhysicalMeasure) {
+        candidateLatents.push(entry.measure);
+      }
+    }
+
+    if (candidateLatents.length === 0) return;
+
+    // If multiple candidates exist (e.g. repeated measure), find the nearest one to the current position
+    let bestLatent = candidateLatents[0];
+    let bestDistance = Infinity;
+
+    for (const lat of candidateLatents) {
+      const mapEntry = timemap.find(t => t.measure === lat);
+      if (mapEntry) {
+        const dist = Math.abs(mapEntry.timeMs - positionMs);
+        if (dist < bestDistance) {
+          bestDistance = dist;
+          bestLatent = lat;
+        }
+      }
+    }
+
+    // Find timeMs from timemap for the chosen latent measure
+    const finalMapEntry = timemap.find(t => t.measure === bestLatent);
+    if (finalMapEntry) {
+      if (onSeek) onSeek(finalMapEntry.timeMs);
+
+      // Instant UI feedback before audio state catches up
+      highlightMeasure(measureEl, false);
+      activeMeasureRef.current = bestLatent;
+    }
+  };
+
+  const hasSvg = svgContentRef.current !== null;
+
+  return (
+    <div className={cn("flex flex-col h-full bg-white text-black relative", isDarkMode ? "dark-theme bg-zinc-950" : "", className)}>
+      {error && (
+        <div className="absolute top-2 left-2 text-destructive bg-destructive/10 p-2 rounded">
+          {error}
+        </div>
+      )}
+      {loading && (
+        <div className={cn(
+          "absolute inset-0 flex items-center justify-center z-[110] backdrop-blur-sm transition-colors",
+          isDarkMode ? "bg-black/60 text-zinc-300" : "bg-white/60 text-zinc-600"
+        )}>
+          <div className="flex flex-col items-center gap-4">
+            <div className={cn(
+              "w-8 h-8 rounded-full border-4 animate-spin",
+              isDarkMode ? "border-zinc-800 border-t-[#C8A856]" : "border-zinc-200 border-t-blue-500"
+            )}></div>
+            <span className="text-sm font-medium tracking-wide">Loading MusicXML...</span>
+          </div>
+        </div>
+      )}
+
+
+      {/* CSS for Magic Sync Highlights - placed in head, won't be recreated */}
+      <style>{`
+        #musicxml-svghost > svg {
+          display: block;
+          width: 100%;
+          height: auto !important;
+        }
+        /* Magic Sync Highlights */
+        #musicxml-svghost .active-measure *,
+        #musicxml-svghost .active-measure use,
+        #musicxml-svghost .active-measure path,
+        #musicxml-svghost .active-measure rect,
+        #musicxml-svghost .active-measure ellipse,
+        #musicxml-svghost .active-measure polyline,
+        #musicxml-svghost .active-measure polygon {
+          fill: #f97316 !important;
+          stroke: #f97316 !important;
+          transition: fill 0.2s, stroke 0.2s;
+        }
+        /* Click-to-seek hover */
+        #musicxml-svghost .measure { cursor: pointer; }
+        #musicxml-svghost .measure:hover *,
+        #musicxml-svghost .measure:hover use,
+        #musicxml-svghost .measure:hover path {
+          fill: #f97316 !important;
+          stroke: #f97316 !important;
+          transition: fill 0.1s, stroke 0.1s;
+        }
+        /* Dark Mode SVG Inversion */
+        .dark-theme #musicxml-container { background: #000000 !important; }
+        .dark-theme #musicxml-svghost {
+          background: #ffffff !important; /* Must be white BEFORE inversion */
+          filter: invert(0.93) hue-rotate(180deg) brightness(1.5) contrast(1.2);
+          box-shadow: none !important;
+        }
+        /* Make sure active measure highlighting remains orange after inversion */
+        .dark-theme #musicxml-svghost .active-measure *,
+        .dark-theme #musicxml-svghost .active-measure use,
+        .dark-theme #musicxml-svghost .active-measure path,
+        .dark-theme #musicxml-svghost .active-measure rect {
+          /* Invert(0.93) + hue-rotate(180) preserves hue but darkens lightness.
+             Using a darker orange (#c2410c) so when multiplied by brightness(1.5) it becomes a vibrant orange! */
+          fill: #c2410c !important;
+          stroke: #c2410c !important;
+        }
+        .dark-theme #musicxml-svghost .measure:hover *,
+        .dark-theme #musicxml-svghost .measure:hover use,
+        .dark-theme #musicxml-svghost .measure:hover path {
+          fill: #c2410c !important;
+          stroke: #c2410c !important;
+        }
+      `}</style>
+
+      {/* Container for SVG — rendered imperatively via ref to avoid React wiping DOM mutations */}
+      <div
+        ref={containerRef}
+        className={cn("flex-1 overflow-auto w-full relative transition-colors scroll-smooth pb-32", isDarkMode ? "bg-[#181a1f]" : "bg-[#f0f2f5]")}
+        id="musicxml-container"
+      >
+        {/* Absolute Floating Playhead Overlay */}
+        <div
+          ref={playheadRef}
+          className={cn(
+            "absolute top-0 left-0 w-1 rounded-full shadow-lg opacity-0 transition-opacity duration-150 pointer-events-none z-10",
+            isDarkMode ? "bg-[#C8A856] shadow-[#C8A856]/40" : "bg-blue-600 shadow-blue-600/40"
+          )}
+          style={{ willChange: 'transform, height' }}
+        />
+
+        {/* Main SVG Render Target */}
+        <div
+          id="musicxml-svghost"
+          ref={svgContainerRef}
+          className="w-full origin-top-left transition-transform duration-300"
+          onClick={handleSvgClick}
+        />
+
+        {!hasSvg && !loading && !error && (
+          <div className="absolute inset-0 flex items-center justify-center p-8">
+            <div className={cn(
+              "w-full max-w-2xl h-64 border-2 border-dashed flex flex-col items-center justify-center rounded-lg shadow-sm transition-colors",
+              isDarkMode
+                ? "border-zinc-700 bg-[#1a1a1f] text-zinc-400 shadow-none"
+                : "border-gray-300 bg-white text-gray-400 object-cover"
+            )}>
+              <span className={cn("text-lg font-medium mb-2", isDarkMode ? "text-zinc-300" : "text-zinc-600")}>No Sheet Music Loaded</span>
+              <span className="text-sm">Please upload a MusicXML or Score file to view the sheet music.</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Floating Zoom Controls */}
+      <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-10 opacity-70 hover:opacity-100 transition-opacity">
+        <button
+          onClick={() => setScale(s => Math.min(s + 10, 120))}
+          className="w-10 h-10 bg-zinc-800 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-zinc-700 active:scale-95 transition-all border border-zinc-700"
+          title="Zoom In"
+        >
+          <ZoomIn className="w-5 h-5" />
+        </button>
+        <button
+          onClick={() => setScale(s => Math.max(s - 10, 20))}
+          className="w-10 h-10 bg-zinc-800 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-zinc-700 active:scale-95 transition-all border border-zinc-700"
+          title="Zoom Out"
+        >
+          <ZoomOut className="w-5 h-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
