@@ -96,6 +96,22 @@ export function PlayShell({
   const [isAutoplayEnabled, setIsAutoplayEnabled] = useState(true);
   const [isControlsCollapsed, setIsControlsCollapsed] = useState(false);
 
+  // Hydrate collapsed state from localStorage defensively
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("bs_player_collapsed") === "true") {
+        setIsControlsCollapsed(true);
+      }
+    } catch {}
+  }, []);
+
+  const handleCollapseToggle = (collapsed: boolean) => {
+    setIsControlsCollapsed(collapsed);
+    try {
+      localStorage.setItem("bs_player_collapsed", collapsed ? "true" : "false");
+    } catch {}
+  };
+
   const [loopState, setLoopState] = useState<{enabled: boolean; startBar: number; endBar: number}>({ 
     enabled: false, 
     startBar: 1, 
@@ -700,7 +716,7 @@ export function PlayShell({
         onSoloToggle={handleSoloToggle}
         onVolumeChange={handleVolumeChange}
         isCollapsed={isControlsCollapsed}
-        onCollapseToggle={setIsControlsCollapsed}
+        onCollapseToggle={handleCollapseToggle}
         playlistId={playlistId}
         hasNext={!!nextProjectId}
         hasPrev={!!prevProjectId}
