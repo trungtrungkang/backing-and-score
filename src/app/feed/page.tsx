@@ -21,15 +21,24 @@ import {
   PlaylistDocument,
   CommentDocument
 } from "@/lib/appwrite";
+import { deletePost } from "@/lib/appwrite/social";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { 
   Heart, MessageSquare, Share2, Music, ListMusic, 
-  Globe, Clock, PenTool, Image as ImageIcon, Send, X, Loader2
+  Globe, Clock, PenTool, Image as ImageIcon, Send, X, Loader2, OctagonX, Trash2, MoreVertical
 } from "lucide-react";
 import { Music4 } from "lucide-react";
 import { getPublicProfile } from "@/app/actions/user";
+import { toast } from "sonner";
+import { useDialogs } from "@/components/ui/dialog-provider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type EnrichedPost = PostDocument & {
   authorProfile?: { name: string; prefs: any };
@@ -70,6 +79,8 @@ export default function FeedPage() {
   const [showAttachModal, setShowAttachModal] = useState(false);
   const [myProjects, setMyProjects] = useState<ProjectDocument[]>([]);
   const [loadingAttach, setLoadingAttach] = useState(false);
+  
+  const { prompt, confirm } = useDialogs();
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -362,6 +373,34 @@ export default function FeedPage() {
                                 {formatTimeAgo(post.$createdAt)}
                               </span>
                             </div>
+                            {user && user.$id === post.authorId && (
+                               <DropdownMenu>
+                                 <DropdownMenuTrigger asChild>
+                                   <button className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ml-2 flex items-center justify-center">
+                                     <MoreVertical className="w-4 h-4" />
+                                   </button>
+                                 </DropdownMenuTrigger>
+                                 <DropdownMenuContent align="end" className="w-40 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 rounded-xl">
+                                   <DropdownMenuItem 
+                                     onClick={async () => {
+                                        if (await confirm({ title: "Delete Post", description: "Are you sure you want to delete this timeline post?", confirmText: "Delete", cancelText: "Cancel" })) {
+                                           try {
+                                              await deletePost(post.$id);
+                                              setPosts(prev => prev.filter(p => p.$id !== post.$id));
+                                              toast.success("Post deleted successfully.");
+                                           } catch {
+                                              toast.error("Failed to delete post.");
+                                           }
+                                        }
+                                     }}
+                                     className="text-red-600 dark:text-red-500 hover:text-red-700 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer font-medium"
+                                   >
+                                     <Trash2 className="w-4 h-4 mr-2" />
+                                     Delete Post
+                                   </DropdownMenuItem>
+                                 </DropdownMenuContent>
+                               </DropdownMenu>
+                            )}
                          </div>
                          
                          {/* Body */}
@@ -411,6 +450,13 @@ export default function FeedPage() {
                            </div>
                          )}
 
+                         {post.attachmentType !== "none" && !post.project && !post.playlist && (
+                           <div className="border border-red-200 dark:border-red-900/30 bg-red-50 dark:bg-red-900/10 rounded-xl p-4 flex items-center justify-center text-sm text-red-500 font-medium mb-3">
+                              <OctagonX className="w-5 h-5 mr-2" />
+                              This attached content is no longer available.
+                           </div>
+                         )}
+
                          {/* Action Footer */}
                          <div className="flex items-center gap-6 mt-1 text-zinc-400">
                             <button 
@@ -437,11 +483,37 @@ export default function FeedPage() {
                                </span>
                             </button>
 
-                            <button className="flex items-center gap-2 text-[13px] font-semibold transition-colors hover:text-green-500 group ml-auto">
-                               <div className="p-1.5 rounded-full group-hover:bg-green-500/10 transition-colors">
-                                  <Share2 className="w-4 h-4" />
-                               </div>
-                            </button>
+                             <button 
+                               onClick={async () => {
+                                 if (!user) {
+                                   toast.error("Please login to share posts.");
+                                   return;
+                                 }
+                                 if (post.attachmentType === "none" || (!post.project && !post.playlist)) {
+                                   toast.error("This post cannot be shared.");
+                                   return; 
+                                 }
+                                 const caption = await prompt({ title: "Share to Feed", description: `Add a caption for this ${post.attachmentType}:`, confirmText: "Share", cancelText: "Cancel" });
+                                 if (caption !== null) {
+                                   try {
+                                     const newPost = await createPost({
+                                       content: caption.trim() || `Check out this ${post.attachmentType}!`,
+                                       attachmentType: post.attachmentType,
+                                       attachmentId: post.attachmentId
+                                     });
+                                     setPosts(prev => [{ ...newPost, project: post.project, playlist: post.playlist, authorProfile: { name: user.name, prefs: user.prefs }, isLiked: false, likesCount: 0 }, ...prev]);
+                                     toast.success("Successfully shared to your Activity Feed!");
+                                   } catch {
+                                     toast.error("Failed to share to feed.");
+                                   }
+                                 }
+                               }} 
+                               className="flex items-center gap-2 text-[13px] font-semibold transition-colors hover:text-green-500 group ml-auto"
+                             >
+                                <div className="p-1.5 rounded-full group-hover:bg-green-500/10 transition-colors">
+                                   <Share2 className="w-4 h-4" />
+                                </div>
+                             </button>
                          </div>
                          
                          {/* Threading UI */}

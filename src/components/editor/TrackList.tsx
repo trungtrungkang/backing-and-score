@@ -10,6 +10,7 @@ import { AudioManager } from "@/lib/audio/AudioManager";
 import { ChevronDown, ChevronUp, MoveRight, Trash2, Plus, Info } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Midi } from "@tonejs/midi";
+import { useDialogs } from "@/components/ui/dialog-provider";
 
 export interface TrackListProps {
   tracks: AudioTrack[];
@@ -72,6 +73,7 @@ export function TrackList({
   midiBase64,
   uploadingAudio = false,
 }: TrackListProps) {
+  const { confirm } = useDialogs();
   const [zoomLevel, setZoomLevel] = useState(4);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -370,8 +372,8 @@ export function TrackList({
                             )}
                             {onDeleteTrack && (
                               <button
-                                onClick={() => {
-                                  if (window.confirm(`Are you sure you want to delete the track "${track.name}"?`)) {
+                                onClick={async () => {
+                                  if (await confirm({ title: "Delete Track", description: `Are you sure you want to delete the track "${track.name}"?`, confirmText: "Delete", cancelText: "Cancel" })) {
                                     onDeleteTrack(track.id);
                                   }
                                 }}

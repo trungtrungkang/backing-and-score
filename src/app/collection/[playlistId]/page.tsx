@@ -11,10 +11,16 @@ import {
   updatePlaylist,
   removeProjectFromPlaylist,
   toggleFavorite,
+  toggleReaction,
+  checkIsReacted,
+  createPost,
   ProjectDocument,
   PlaylistDocument
 } from "@/lib/appwrite";
+import { getPublicProfile } from "@/app/actions/user";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-provider";
+import { toast } from "sonner";
 import { Play, Share2, MoreVertical, Music4, ListMusic, Globe, Lock, Trash2, Edit2, X, Heart } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,6 +35,7 @@ export default function CollectionPage() {
   const playlistId = params.playlistId as string;
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { confirm, prompt } = useDialogs();
 
   const [playlist, setPlaylist] = useState<PlaylistDocument | null>(null);
   const [projects, setProjects] = useState<ProjectDocument[]>([]);
@@ -36,6 +43,8 @@ export default function CollectionPage() {
   const [error, setError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [authorProfile, setAuthorProfile] = useState<{name: string, prefs: any} | null>(null);
+  const [isLiked, setIsLiked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +65,18 @@ export default function CollectionPage() {
               setProjects(fetchedProjs.filter((p): p is ProjectDocument => p !== null));
            }
         }
+        
+        try {
+          const profile = await getPublicProfile(pl.ownerId);
+          if (!cancelled) setAuthorProfile(profile as any);
+        } catch {}
+
+        if (user) {
+          try {
+            const liked = await checkIsReacted("playlist", playlistId);
+            if (!cancelled) setIsLiked(liked);
+          } catch {}
+        }
       } catch (err: any) {
         if (!cancelled) setError("Collection not found or access denied.");
       } finally {
@@ -71,14 +92,14 @@ export default function CollectionPage() {
   }, [playlistId, authLoading]);
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this collection?")) return;
+    if (!(await confirm({ title: "Delete Collection", description: "Are you sure you want to delete this collection?", confirmText: "Delete", cancelText: "Cancel" }))) return;
     setIsDeleting(true);
     try {
       await deletePlaylist(playlistId);
       router.push("/dashboard/collections");
     } catch (err) {
       console.error(err);
-      alert("Failed to delete playlist.");
+      toast.error("Failed to delete playlist.");
       setIsDeleting(false);
     }
   };
@@ -91,7 +112,7 @@ export default function CollectionPage() {
       setPlaylist(updated);
     } catch (err) {
       console.error(err);
-      alert("Failed to toggle publish status.");
+      toast.error("Failed to toggle publish status.");
     } finally {
       setIsPublishing(false);
     }
@@ -99,13 +120,13 @@ export default function CollectionPage() {
 
   const handleRemoveTrack = async (projectId: string) => {
     if (!user || user.$id !== playlist?.ownerId) return;
-    if (!confirm("Remove this track from the playlist?")) return;
+    if (!(await confirm({ title: "Remove Track", description: "Remove this track from the playlist?", confirmText: "Remove", cancelText: "Cancel" }))) return;
     try {
       const updated = await removeProjectFromPlaylist(playlistId, projectId);
       setPlaylist(updated);
       setProjects(prev => prev.filter(p => p.$id !== projectId));
     } catch {
-      alert("Failed to remove track.");
+      toast.error("Failed to remove track.");
     }
   };
 
@@ -148,7 +169,14 @@ export default function CollectionPage() {
             )}
             
             {/* Play Overlay */}
-            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm cursor-pointer">
+            <div 
+               className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm cursor-pointer"
+               onClick={() => {
+                  if (projects.length > 0) {
+                     router.push(`/play/${projects[0].$id}?list=${playlist.$id}`);
+                  }
+               }}
+            >
                <button className="w-16 h-16 rounded-full bg-[#C8A856] text-black shadow-2xl flex items-center justify-center transform scale-90 group-hover:scale-100 transition-all hover:bg-white">
                  <Play className="w-8 h-8 ml-1" />
                </button>
@@ -164,8 +192,15 @@ export default function CollectionPage() {
                )}
             </div>
             <h1 className="text-3xl font-black tracking-tight leading-tight">{playlist.name}</h1>
-            <p className="text-zinc-500 font-medium my-2">
-               Created by <Link href={`/u/${playlist.ownerId}`} className="text-zinc-900 dark:text-white hover:underline hover:text-[#C8A856] transition-colors">{playlist.ownerId.substring(0,8)}</Link>
+            <p className="text-zinc-500 font-medium my-2 flex items-center gap-2">
+               <span className="w-6 h-6 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-[10px] font-bold overflow-hidden">
+                 {authorProfile?.prefs?.avatarUrl ? (
+                   <img src={authorProfile.prefs.avatarUrl} className="w-full h-full object-cover" alt="avatar" />
+                 ) : (
+                   authorProfile?.name ? authorProfile.name.substring(0,2).toUpperCase() : playlist.ownerId.substring(0,2).toUpperCase()
+                 )}
+               </span>
+               Created by <Link href={`/u/${playlist.ownerId}`} className="text-zinc-900 dark:text-white hover:underline hover:text-[#C8A856] transition-colors">{authorProfile?.name || playlist.ownerId.substring(0,8)}</Link>
             </p>
             <p className="text-zinc-600 dark:text-zinc-400 text-sm leading-relaxed mb-4">
                {playlist.description || "No description provided."}
@@ -183,8 +218,17 @@ export default function CollectionPage() {
                >
                  <Play className="w-5 h-5 fill-current" /> Play All
                </Button>
-               <Button variant="ghost" size="icon" className="w-12 h-12 rounded-full border border-zinc-200 dark:border-zinc-800 hover:border-[#C8A856] hover:text-[#C8A856] transition-colors">
-                 <Heart className="w-5 h-5" />
+               <Button 
+                onClick={async () => {
+                  if (!user) return toast.error("Please login to like collections.");
+                  setIsLiked(!isLiked);
+                  await toggleReaction("playlist", playlistId, "like").catch(() => setIsLiked(isLiked));
+                }}
+                variant="ghost" 
+                size="icon" 
+                className={`w-12 h-12 rounded-full border border-zinc-200 dark:border-zinc-800 hover:border-rose-500 transition-colors ${isLiked ? 'text-rose-500 border-rose-500 bg-rose-500/10' : 'hover:text-rose-500'}`}
+               >
+                 <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
                </Button>
                {/* Context Menu */}
                <DropdownMenu>
@@ -193,9 +237,27 @@ export default function CollectionPage() {
                        <MoreVertical className="w-5 h-5" />
                      </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 rounded-xl">
-                     <DropdownMenuItem className="py-2.5 font-medium cursor-pointer">
-                        <Share2 className="w-4 h-4 mr-2" /> Share Link
+                   <DropdownMenuContent align="end" className="w-48 bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 rounded-xl">
+                     <DropdownMenuItem onClick={async () => {
+                        if (!user) {
+                           toast.error("Please login to share to feed.");
+                           return;
+                        }
+                        const caption = await prompt({ title: "Share Collection", description: "Say something about this collection:", defaultValue: `Check out this collection: ${playlist.name}`, confirmText: "Share", cancelText: "Cancel" });
+                        if (caption !== null) {
+                           try {
+                              await createPost({
+                                 content: caption.trim() || `Check out this collection: ${playlist.name}`,
+                                 attachmentType: "playlist",
+                                 attachmentId: playlist.$id
+                              });
+                              toast.success("Successfully shared to your Activity Feed!");
+                           } catch {
+                              toast.error("Failed to share collection. Please try again.");
+                           }
+                        }
+                     }} className="py-2.5 font-medium cursor-pointer">
+                        <Share2 className="w-4 h-4 mr-2" /> Share to Feed
                      </DropdownMenuItem>
                      
                      {isOwner && (

@@ -4,6 +4,8 @@ import Script from "next/script";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Header } from "@/components/Header";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { DialogProvider } from "@/components/ui/dialog-provider";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -35,8 +37,11 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <AuthProvider>
           <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-            <Header />
-            {children}
+            <DialogProvider>
+              <Header />
+              {children}
+            </DialogProvider>
+            <Toaster position="bottom-right" richColors theme="system" />
           </ThemeProvider>
         </AuthProvider>
       </body>

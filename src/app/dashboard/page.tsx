@@ -9,9 +9,12 @@ import {
   listMyProjects,
   createProject,
   deleteProject,
+  ProjectDocument,
+  ProjectPayload
 } from "@/lib/appwrite";
-import { ProjectDocument, ProjectPayload } from "@/lib/appwrite";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-provider";
+import { toast } from "sonner";
 
 function formatDate(iso: string) {
   try {
@@ -38,6 +41,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm } = useDialogs();
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -96,7 +100,7 @@ export default function DashboardPage() {
     e.preventDefault();
     e.stopPropagation();
     if (deletingId) return;
-    if (!confirm("Delete this project? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete Project", description: "Delete this project? This cannot be undone.", confirmText: "Delete", cancelText: "Cancel" }))) return;
     setDeletingId(projectId);
     try {
       await deleteProject(projectId);
@@ -145,20 +149,6 @@ export default function DashboardPage() {
             </Link>
           </nav>
         </div>
-        
-        <div>
-          <h2 className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-4">Setlists</h2>
-          <nav className="flex flex-col gap-1">
-            <button className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors">
-              <ListMusic className="w-4 h-4" />
-              Acoustic Show T7
-            </button>
-            <button className="flex items-center gap-3 px-3 py-2 rounded-md border border-dashed border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
-              <Plus className="w-4 h-4" />
-              New Setlist
-            </button>
-          </nav>
-        </div>
       </aside>
 
       {/* Main Content Area */}
@@ -173,7 +163,7 @@ export default function DashboardPage() {
                 </p>
               </div>
               <Button 
-                onClick={() => sendVerification().then(() => alert("Verification email sent!"))} 
+                onClick={() => sendVerification().then(() => toast.success("Verification email sent!"))} 
                 variant="outline" 
                 size="sm" 
                 className="shrink-0 bg-white dark:bg-zinc-900"

@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { listAllUsers, toggleUserLabel } from "@/app/actions/admin";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { toast } from "sonner";
 import { ShieldAlert, Loader2 } from "lucide-react";
 
 interface UserInfo {
@@ -64,7 +67,7 @@ export default function AdminDashboardPage() {
 
       await toggleUserLabel(jwt, userId, label, !currentStatus);
     } catch (err: any) {
-      alert("Failed to toggle label: " + err.message);
+      toast.error("Failed to toggle label: " + err.message);
       loadUsers(); // Revert
     }
   }

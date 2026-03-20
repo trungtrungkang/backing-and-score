@@ -15,6 +15,7 @@ import {
   PlaylistDocument
 } from "@/lib/appwrite";
 import { Button } from "@/components/ui/button";
+import { useDialogs } from "@/components/ui/dialog-provider";
 
 function formatDate(iso: string) {
   try {
@@ -34,6 +35,7 @@ export default function CollectionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { confirm } = useDialogs();
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -83,7 +85,7 @@ export default function CollectionsPage() {
     e.preventDefault();
     e.stopPropagation();
     if (deletingId) return;
-    if (!confirm("Delete this collection? This cannot be undone.")) return;
+    if (!(await confirm({ title: "Delete Collection", description: "Delete this collection? This cannot be undone.", confirmText: "Delete", cancelText: "Cancel" }))) return;
     setDeletingId(playlistId);
     try {
       await deletePlaylist(playlistId);

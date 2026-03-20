@@ -61,6 +61,7 @@ export {
 
 export {
   createPost,
+  deletePost,
   getTimeline,
   followUser,
   unfollowUser,

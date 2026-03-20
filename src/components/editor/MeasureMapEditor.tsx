@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Plus, Trash2, X, Wand2 } from "lucide-react";
 import Draggable from "react-draggable";
 import type { DAWPayload } from "@/lib/daw/types";
+import { useDialogs } from "@/components/ui/dialog-provider";
+import { toast } from "sonner";
 
 interface MeasureMapEditorProps {
   payload: DAWPayload;
@@ -28,6 +30,7 @@ function getPhysicalMeasure(latent: number, measureMap?: Record<number, number>)
 }
 
 export function MeasureMapEditor({ payload, positionMs, onPayloadChange, onClose }: MeasureMapEditorProps) {
+  const { confirm, prompt } = useDialogs();
   const currentMap = payload.notationData?.measureMap || {};
   
   // Convert object { "60": 50 } to array [{ latent: 60, physical: 50 }] for rendering
@@ -50,12 +53,12 @@ export function MeasureMapEditor({ payload, positionMs, onPayloadChange, onClose
   const [sigValue, setSigValue] = useState<string>("");
   const nodeRef = useRef(null);
 
-  const handleAutoGenerate = () => {
+  const handleAutoGenerate = async () => {
     if (timemap.length > 0) {
-      if (!confirm("Your existing timeline records will be overwritten. Continue?")) return;
+      if (!(await confirm({ title: "Overwrite Timeline", description: "Your existing timeline records will be overwritten. Continue?", confirmText: "Overwrite", cancelText: "Cancel" }))) return;
     }
     
-    const countStr = prompt("How many transparent measures should be generated?", "100");
+    const countStr = await prompt({ title: "Generate Measures", description: "How many transparent measures should be generated?", defaultValue: "100", confirmText: "Generate", cancelText: "Cancel" });
     if (!countStr) return;
     const count = parseInt(countStr, 10);
     if (isNaN(count) || count <= 0) return;
@@ -101,7 +104,7 @@ export function MeasureMapEditor({ payload, positionMs, onPayloadChange, onClose
     const phys = parseInt(newPhysical, 10);
     
     if (isNaN(lat) || isNaN(phys) || lat <= 0 || phys <= 0) {
-      alert("Please enter valid positive numbers for both measures.");
+      toast.error("Please enter valid positive numbers for both measures.");
       return;
     }
 
@@ -145,7 +148,7 @@ export function MeasureMapEditor({ payload, positionMs, onPayloadChange, onClose
        setSigLatent("");
        setSigValue("");
     } else {
-       alert("Measure not recorded in timeline yet.");
+       toast.error("Measure not recorded in timeline yet.");
     }
   };
 

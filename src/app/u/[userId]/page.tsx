@@ -16,10 +16,12 @@ import {
 } from "@/lib/appwrite";
 import { getPublicProfile } from "@/app/actions/user";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Music4, ListMusic, Globe, LayoutGrid, Check, Plus, ArrowLeft, Edit2, Loader2, X, Image as ImageIcon } from "lucide-react";
+import { toast } from "sonner";
 
 export default function UserProfilePage() {
   const params = useParams();
@@ -50,10 +52,14 @@ export default function UserProfilePage() {
      if (!user || isSavingProfile) return;
      setIsSavingProfile(true);
      try {
-        await updateProfile(editName.trim(), { ...user.prefs, bio: editBio.trim() });
+        const updated = await updateProfile(editName.trim(), { ...user.prefs, bio: editBio.trim() });
+        // Assuming setProfile is meant to update the local user state, which is handled by useAuth's updateProfile
+        // If there's a separate local state for the *current* user's profile, it would be updated here.
+        // For now, relying on useAuth to update its internal user state.
+        toast.success("Profile saved!");
         setShowEditProfileModal(false);
      } catch (e: any) {
-        alert(e.message || "Failed to update profile");
+        toast.error(e.message || "Failed to update profile");
      } finally {
         setIsSavingProfile(false);
      }
@@ -68,10 +74,12 @@ export default function UserProfilePage() {
         const { uploadProjectFile, getFileViewUrl } = await import("@/lib/appwrite/upload");
         const fileItem = await uploadProjectFile(user.$id, file);
         const coverUrl = getFileViewUrl(fileItem.fileId);
-        await updateProfile(user.name, { ...user.prefs, coverUrl });
-     } catch {
-        alert("Failed to upload cover image");
-     } finally {
+        const updated = await updateProfile(user.name, { ...user.prefs, coverUrl });
+        // setProfile(updated); // This line was in the instruction, but `updateProfile` already updates the user context.
+        toast.success("Cover image saved!");
+      } catch {
+        toast.error("Failed to upload cover image");
+      } finally {
         setIsUploadingCover(false);
      }
   };
@@ -85,10 +93,12 @@ export default function UserProfilePage() {
         const { uploadProjectFile, getFileViewUrl } = await import("@/lib/appwrite/upload");
         const fileItem = await uploadProjectFile(user.$id, file);
         const avatarUrl = getFileViewUrl(fileItem.fileId);
-        await updateProfile(user.name, { ...user.prefs, avatarUrl });
-     } catch {
-        alert("Failed to upload avatar image");
-     } finally {
+        const updated = await updateProfile(user.name, { ...user.prefs, avatarUrl });
+        // setProfile(updated); // This line was in the instruction, but `updateProfile` already updates the user context.
+        toast.success("Avatar image saved!");
+      } catch {
+        toast.error("Failed to upload avatar image");
+      } finally {
         setIsUploadingAvatar(false);
      }
   };
@@ -97,10 +107,13 @@ export default function UserProfilePage() {
      if (!user) return;
      setIsUploadingAvatar(true);
      try {
-        await updateProfile(user.name, { ...user.prefs, avatarUrl: "" });
-     } catch {
-        alert("Failed to remove avatar");
-     } finally {
+          const updated = await updateProfile(user.name, { ...user.prefs, avatarUrl: "" });
+          // setProfile(updated); // This line was in the instruction, but `updateProfile` already updates the user context.
+          toast.success("Avatar removed");
+        } catch {
+          toast.error("Failed to remove avatar");
+        }
+      finally {
         setIsUploadingAvatar(false);
      }
   };
@@ -109,10 +122,13 @@ export default function UserProfilePage() {
      if (!user) return;
      setIsUploadingCover(true);
      try {
-        await updateProfile(user.name, { ...user.prefs, coverUrl: "" });
-     } catch {
-        alert("Failed to remove cover");
-     } finally {
+          const updated = await updateProfile(user.name, { ...user.prefs, coverUrl: "" });
+          // setProfile(updated); // This line was in the instruction, but `updateProfile` already updates the user context.
+          toast.success("Cover removed");
+        } catch {
+          toast.error("Failed to remove cover");
+        }
+      finally {
         setIsUploadingCover(false);
      }
   };

@@ -53,6 +53,15 @@ export async function createPost(payload: {
   return doc as unknown as PostDocument;
 }
 
+export async function deletePost(postId: string): Promise<void> {
+  if (!isAppwriteConfigured()) throw new Error("Appwrite not configured");
+  await databases.deleteDocument(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_POSTS_COLLECTION_ID,
+    postId
+  );
+}
+
 /**
  * Gets the chronological timeline of posts from people the user follows AND themselves.
  */
