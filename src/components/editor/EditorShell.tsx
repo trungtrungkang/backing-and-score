@@ -647,8 +647,19 @@ export function EditorShell({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isSyncMode, handlePlay, handlePause]);
-
-
+  // Handle iOS/Mobile backgrounding & lock screen exclusively (leave desktop background tabs playing)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && isPlayingRef.current) {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+        if (isIOS) {
+           handlePause();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [handlePause]);
 
   const handleStop = useCallback(() => {
     if (midiTimeoutRef.current) clearTimeout(midiTimeoutRef.current);
