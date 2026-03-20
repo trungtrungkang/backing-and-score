@@ -369,7 +369,7 @@ export default function CollectionPage() {
                        <div className="hidden sm:flex w-12 items-center justify-center font-bold text-zinc-400 group-hover:hidden text-lg">
                          {index + 1}
                        </div>
-                       <div className="hidden sm:flex w-12 items-center justify-center group-hover:flex">
+                       <div className="hidden sm:group-hover:flex w-12 items-center justify-center">
                          <button onClick={() => router.push(`/play/${proj.$id}`)} className="text-zinc-900 dark:text-white hover:text-[#C8A856] dark:hover:text-[#C8A856] transition-colors">
                            <Play className="w-5 h-5 fill-current" />
                          </button>
