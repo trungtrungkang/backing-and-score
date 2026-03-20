@@ -9,11 +9,13 @@ import {
   getProject,
   updateProject,
   uploadProjectFile,
+  getFileViewUrl,
   Permission,
   Role,
   type ProjectDocument,
   type ProjectPayload,
 } from "@/lib/appwrite";
+import { toast } from "sonner";
 import { EditorShell } from "@/components/editor/EditorShell";
 import {
   normalizePayload,
@@ -176,6 +178,26 @@ export default function ProjectPage() {
       );
     } finally {
       setUploadingScore(false);
+    }
+  };
+
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const handleUploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !project || !isOwner || uploadingCover) return;
+    e.target.value = "";
+    setUploadingCover(true);
+    try {
+      const { fileId } = await uploadProjectFile(projectId, file);
+      const url = getFileViewUrl(fileId);
+      await updateProject(projectId, { coverUrl: url });
+      setProject({ ...project, coverUrl: url } as ProjectDocument);
+      toast.success("Cover image uploaded successfully.");
+    } catch (err: any) {
+      console.error("Upload Cover error:", err);
+      toast.error(err?.message ? `Failed to upload: ${err.message}` : "Failed to upload cover.");
+    } finally {
+      setUploadingCover(false);
     }
   };
 
@@ -405,6 +427,9 @@ export default function ProjectPage() {
             uploadingScore={uploadingScore}
             uploadingAudio={uploadingAudio}
             uploadError={uploadError}
+            onUploadCover={isOwner ? handleUploadCover : undefined}
+            uploadingCover={uploadingCover}
+            coverUrl={project.coverUrl}
           />
         </div>
       ) : (

@@ -15,13 +15,15 @@ import {
   checkIsReacted,
   createPost,
   ProjectDocument,
-  PlaylistDocument
+  PlaylistDocument,
+  uploadProjectFile,
+  getFileViewUrl
 } from "@/lib/appwrite";
 import { getPublicProfile } from "@/app/actions/user";
 import { Button } from "@/components/ui/button";
 import { useDialogs } from "@/components/ui/dialog-provider";
 import { toast } from "sonner";
-import { Play, Share2, MoreVertical, Music4, ListMusic, Globe, Lock, Trash2, Edit2, X, Heart } from "lucide-react";
+import { Play, Share2, MoreVertical, Music4, ListMusic, Globe, Lock, Trash2, Edit2, X, Heart, Image as ImageIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -104,6 +106,25 @@ export default function CollectionPage() {
     }
   };
 
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const handleUploadCover = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !playlist || !isOwner || uploadingCover) return;
+    e.target.value = "";
+    setUploadingCover(true);
+    try {
+      const { fileId } = await uploadProjectFile(playlistId, file);
+      const updated = await updatePlaylist(playlistId, { coverImageId: fileId });
+      setPlaylist(updated);
+      toast.success("Collection cover uploaded successfully.");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message ? `Failed to upload: ${err.message}` : "Failed to upload cover.");
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
   const handleTogglePublish = async () => {
     if (!playlist) return;
     setIsPublishing(true);
@@ -163,21 +184,38 @@ export default function CollectionPage() {
 
          <div className="w-full aspect-square bg-white dark:bg-black/50 border border-zinc-200 dark:border-white/10 rounded-2xl shadow-xl flex items-center justify-center overflow-hidden shrink-0 relative group">
             {playlist.coverImageId ? (
-              <img src="#" alt="cover" className="w-full h-full object-cover" />
+              <img src={getFileViewUrl(playlist.coverImageId)} alt="cover" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
             ) : (
               <ListMusic className="w-24 h-24 text-zinc-300 dark:text-zinc-800" />
+            )}
+
+            {/* Prominent Overlay Cover Upload Button */}
+            {isOwner && (
+               <label 
+                 onClick={(e) => e.stopPropagation()}
+                 className="absolute top-4 right-4 z-[200] px-3 py-2 rounded-full bg-white/95 dark:bg-zinc-900/95 hover:bg-white dark:hover:bg-black backdrop-blur-md flex items-center justify-center gap-2 text-zinc-900 dark:text-white cursor-pointer shadow-2xl border border-zinc-200 dark:border-zinc-800 transition-all hover:scale-105 group/upload"
+               >
+                 <ImageIcon className={`w-4 h-4 ${uploadingCover ? 'animate-pulse' : 'text-[#C8A856]'}`} />
+                 <span className="text-xs font-bold whitespace-nowrap overflow-hidden transition-all duration-300 max-w-[0px] group-hover/upload:max-w-[100px] opacity-0 group-hover/upload:opacity-100">
+                    {uploadingCover ? "Uploading..." : "Change Cover"}
+                 </span>
+                 <input type="file" className="hidden" accept="image/*" onChange={(e) => { e.stopPropagation(); handleUploadCover(e); }} disabled={uploadingCover} />
+               </label>
             )}
             
             {/* Play Overlay */}
             <div 
-               className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm cursor-pointer"
-               onClick={() => {
+               className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm cursor-pointer z-10"
+               onClick={(e) => {
+                  e.stopPropagation();
                   if (projects.length > 0) {
                      router.push(`/play/${projects[0].$id}?list=${playlist.$id}`);
+                  } else {
+                     toast.info("No tracks in this collection to play.");
                   }
                }}
             >
-               <button className="w-16 h-16 rounded-full bg-[#C8A856] text-black shadow-2xl flex items-center justify-center transform scale-90 group-hover:scale-100 transition-all hover:bg-white">
+               <button className="w-16 h-16 rounded-full bg-[#C8A856] text-black shadow-2xl flex items-center justify-center transform scale-90 group-hover:scale-100 transition-all hover:bg-white focus:outline-none">
                  <Play className="w-8 h-8 ml-1" />
                </button>
             </div>
@@ -263,6 +301,12 @@ export default function CollectionPage() {
                      {isOwner && (
                        <>
                          <DropdownMenuSeparator className="bg-zinc-200 dark:bg-zinc-800" />
+                         <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()} className="py-2.5 font-medium cursor-pointer">
+                            <label className="flex w-full cursor-pointer items-center text-zinc-900 dark:text-zinc-100 m-0">
+                               <ImageIcon className="w-4 h-4 mr-2" /> {uploadingCover ? "Uploading..." : "Upload Cover Art"}
+                               <input type="file" className="hidden" accept="image/*" onChange={handleUploadCover} disabled={uploadingCover} />
+                            </label>
+                         </DropdownMenuItem>
                          <DropdownMenuItem onClick={handleTogglePublish} className="py-2.5 font-medium cursor-pointer">
                             {playlist.isPublished ? <Lock className="w-4 h-4 mr-2" /> : <Globe className="w-4 h-4 mr-2" />}
                             {playlist.isPublished ? "Make Private" : "Make Public"}

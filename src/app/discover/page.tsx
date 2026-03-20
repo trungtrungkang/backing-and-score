@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { listPublished, listPublishedPlaylists, copyProjectToMine, toggleFavorite, listMyFavorites, type ProjectDocument, type PlaylistDocument } from "@/lib/appwrite";
+import { listPublished, listPublishedPlaylists, copyProjectToMine, toggleFavorite, listMyFavorites, getFileViewUrl, type ProjectDocument, type PlaylistDocument } from "@/lib/appwrite";
 import { Play, Bookmark, Music4, Search, SlidersHorizontal, ChevronRight, Pencil, Heart, ListMusic, LayoutGrid, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
@@ -236,9 +236,13 @@ export default function DiscoverPage() {
              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                {playlists.slice(0, 3).map((pl) => (
                   <Link href={`/collection/${pl.$id}`} key={pl.$id} className="block group">
-                     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-2xl overflow-hidden hover:shadow-xl hover:-translate-y-1 hover:border-zinc-300 dark:hover:border-white/20 transition-all duration-300">
-                        <div className="h-40 bg-zinc-100 dark:bg-black/50 relative overflow-hidden flex items-center justify-center p-6 border-b border-zinc-200 dark:border-white/5">
-                           <LayoutGrid className="w-16 h-16 text-zinc-300 dark:text-zinc-700 opacity-50 transition-transform duration-500 group-hover:scale-110" />
+                     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-2xl overflow-hidden hover:shadow-xl hover:-translate-y-1 hover:border-zinc-300 dark:hover:border-white/20 transition-all duration-300 transform-gpu isolate">
+                        <div className="h-40 bg-zinc-100 dark:bg-black/50 relative overflow-hidden rounded-t-[15px] flex items-center justify-center p-6 border-b border-zinc-200 dark:border-white/5 z-0">
+                           {pl.coverImageId ? (
+                             <img src={getFileViewUrl(pl.coverImageId).toString()} alt="cover" className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 border-0" />
+                           ) : (
+                             <LayoutGrid className="w-16 h-16 text-zinc-300 dark:text-zinc-700 opacity-50 transition-transform duration-500 group-hover:scale-110" />
+                           )}
                            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 pointer-events-none mix-blend-overlay"></div>
                            <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider text-white flex items-center gap-1.5 border border-white/10 shadow-lg">
                               <Globe className="w-3 h-3 text-blue-400" /> PUBLIC

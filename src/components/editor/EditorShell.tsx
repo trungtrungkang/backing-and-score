@@ -8,12 +8,14 @@ import { TrackList } from "./TrackList";
 import { MusicXMLVisualizer } from "./MusicXMLVisualizer";
 import { MeasureMapEditor } from "./MeasureMapEditor";
 import {
-  Play, Pause, Square, Repeat, ChevronDown, ChevronUp, Music, ArrowLeft, MoreVertical, X, Tag, Activity, Map, PlaySquare, Sun, Moon, MoreHorizontal, Check
+  Play, Pause, Square, Repeat, ChevronDown, ChevronUp, Music, ArrowLeft, MoreVertical, X, Tag, Activity, Map, PlaySquare, Sun, Moon, MoreHorizontal, Check, Image as ImageIcon, Share
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getFileViewUrl } from "@/lib/appwrite";
+import { getFileViewUrl, createPost } from "@/lib/appwrite";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
+import { toast } from "sonner";
+import { useDialogs } from "@/components/ui/dialog-provider";
 import type { DAWPayload, AudioTrack } from "@/lib/daw/types";
 import { AudioManager, type TrackParams } from "@/lib/audio/AudioManager";
 import { Midi } from "@tonejs/midi";
@@ -43,6 +45,9 @@ export interface EditorShellProps {
   uploadingScore?: boolean;
   uploadingAudio?: boolean;
   uploadError?: string | null;
+  onUploadCover?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  uploadingCover?: boolean;
+  coverUrl?: string;
 }
 
 export function EditorShell({
@@ -67,7 +72,11 @@ export function EditorShell({
   uploadingScore = false,
   uploadingAudio = false,
   uploadError,
+  onUploadCover,
+  uploadingCover = false,
+  coverUrl,
 }: EditorShellProps) {
+  const { prompt } = useDialogs();
   const [shareCopied, setShareCopied] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
   const [muteByTrackId, setMuteByTrackId] = useState<Record<string, boolean>>({});
@@ -696,6 +705,31 @@ export function EditorShell({
     });
   }, [shareUrl]);
 
+  const handleShareToFeed = useCallback(async () => {
+    if (!projectId || !isPublished) {
+      toast.error("You must publish the project first to share it on your feed.");
+      return;
+    }
+    const caption = await prompt({
+      title: "Share Project to Feed",
+      description: "Write a caption for your post:",
+      confirmText: "Share",
+      cancelText: "Cancel",
+    });
+    if (caption !== null) {
+      try {
+        await createPost({
+          content: caption,
+          attachmentType: "project",
+          attachmentId: projectId,
+        });
+        toast.success("Project shared to your timeline feed!");
+      } catch (err) {
+        toast.error("Failed to share project to feed.");
+      }
+    }
+  }, [projectId, prompt, isPublished]);
+
   const handleCopyEmbed = useCallback(() => {
     if (!embedUrl) return;
     const iframeHtml = `<iframe src="${embedUrl}" width="640" height="400" frameborder="0" allow="autoplay" title="Backing & Score"></iframe>`;
@@ -975,6 +1009,9 @@ export function EditorShell({
 
         {isOwner && onNameChange ? (
           <div className="flex items-center gap-2 shrink-0 flex-1 min-w-[200px] sm:max-w-md">
+            {coverUrl && (
+              <img src={coverUrl} alt="Cover" className="w-6 h-6 rounded-sm object-cover shadow-sm shrink-0 border border-zinc-200 dark:border-zinc-700" />
+            )}
             <span className="shrink-0 hidden sm:inline">Title:</span>
             <input
               value={projectName}
@@ -984,7 +1021,12 @@ export function EditorShell({
             />
           </div>
         ) : (
-          <span className="truncate max-w-[200px] text-zinc-900 dark:text-zinc-300 font-medium">{projectName || "Untitled"}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            {coverUrl && (
+              <img src={coverUrl} alt="Cover" className="w-6 h-6 rounded-sm object-cover shadow-sm shrink-0 border border-zinc-200 dark:border-zinc-700" />
+            )}
+            <span className="truncate max-w-[200px] text-zinc-900 dark:text-zinc-300 font-medium">{projectName || "Untitled"}</span>
+          </div>
         )}
 
         {/* Tags UI (Compact Button) */}
@@ -1052,73 +1094,84 @@ export function EditorShell({
         <div className="flex-1 flex items-center justify-end gap-3 shrink-0">
           {projectId && <ProjectActionsMenu projectId={projectId} />}
           
-          {/* Desktop/Tablet Inline Menu */}
-          <div className="hidden xl:flex items-center gap-3">
-            <button onClick={handleCopyLink} className="whitespace-nowrap hover:text-zinc-900 dark:hover:text-white transition-colors">{shareCopied ? "Copied Link!" : "Share Link"}</button>
-            <div className="w-px h-3 bg-zinc-700"></div>
-            {projectId && (
-               <Link href={`/play/${projectId}`} className="whitespace-nowrap hover:text-blue-600 dark:hover:text-blue-300 transition-colors text-blue-500 dark:text-blue-400 flex items-center gap-1">
-                 <PlaySquare className="w-3.5 h-3.5" /> Play Mode
-               </Link>
-            )}
-
+          {/* Unified Tooling Navigation (Desktop & Mobile) */}
+          <div className="flex items-center gap-2">
             {isOwner && (
               <>
-                <div className="w-px h-3 bg-zinc-700 mx-1"></div>
-                {onUploadScore && (
-                  <label className="whitespace-nowrap cursor-pointer hover:text-zinc-900 dark:hover:text-white transition-colors">
-                    {uploadingScore ? "Uploading..." : "+ MusicXML"}
-                    <input type="file" className="hidden" accept=".musicxml,.xml,.mxl" onChange={onUploadScore} disabled={uploadingScore} />
-                  </label>
-                )}
-                <Button size="sm" onClick={onSave} disabled={saving} className="h-6 px-3 bg-zinc-700 hover:bg-zinc-600 text-white text-[10px] uppercase font-bold tracking-wider rounded border border-zinc-600">
+                <Button size="sm" onClick={onSave} disabled={saving} className="h-7 px-3 bg-zinc-700 hover:bg-zinc-600 text-white text-[11px] uppercase font-bold tracking-wider rounded border border-zinc-600 hidden sm:flex">
                   {saving ? "Saving…" : "Save"}
                 </Button>
                 {onPublish && !isPublished && (
-                  <Button size="sm" onClick={onPublish} disabled={publishing} className="h-6 px-3 bg-[#C8A856] hover:bg-[#D4B86A] text-black text-[10px] uppercase font-bold tracking-wider rounded border border-[#C8A856]/50">
+                  <Button size="sm" onClick={onPublish} disabled={publishing} className="h-7 px-3 bg-[#C8A856] hover:bg-[#D4B86A] text-black text-[11px] uppercase font-bold tracking-wider rounded border border-[#C8A856]/50 hidden sm:flex">
                     {publishing ? "Publishing…" : "Publish"}
                   </Button>
                 )}
                 {onUnpublish && isPublished && (
-                  <Button size="sm" onClick={onUnpublish} disabled={publishing} className="h-6 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] uppercase font-bold tracking-wider rounded border border-zinc-600">
+                  <Button size="sm" onClick={onUnpublish} disabled={publishing} className="h-7 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] uppercase font-bold tracking-wider rounded border border-zinc-600 hidden sm:flex">
                     {publishing ? "Unpublishing…" : "Unpublish"}
                   </Button>
                 )}
               </>
             )}
-          </div>
 
-          {/* Mobile Collapsed Menu */}
-          <div className="xl:hidden block">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center justify-center p-1.5 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+                <button className="flex items-center justify-center p-1.5 rounded-md hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors focus:outline-none">
                   <MoreHorizontal className="w-4 h-4" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48 bg-white dark:bg-[#1A1A1E] border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300 p-1 z-[150]">
-                <DropdownMenuItem onClick={handleCopyLink} className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-zinc-700 dark:text-zinc-300 py-2 text-xs transition-colors">
-                  {shareCopied ? "Copied Link!" : "Share Link"}
-                </DropdownMenuItem>
+              <DropdownMenuContent align="end" className="w-52 bg-white dark:bg-[#1A1A1E] border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-300 p-1 z-[150] shadow-xl">
                 {projectId && (
-                  <DropdownMenuItem asChild className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 py-2 text-xs transition-colors">
+                  <DropdownMenuItem asChild className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 py-2.5 text-xs transition-colors">
                      <Link href={`/play/${projectId}`} className="flex w-full items-center gap-2 text-blue-600 dark:text-blue-400">
                        <PlaySquare className="w-3.5 h-3.5" /> Play Mode
                      </Link>
-                   </DropdownMenuItem>
-                )}
-                {isOwner && onUploadScore && (
-                  <DropdownMenuItem asChild className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-zinc-700 dark:text-zinc-300 py-2 text-xs transition-colors">
-                    <label className="flex w-full cursor-pointer items-center">
-                      {uploadingScore ? "Uploading..." : "+ MusicXML"}
-                      <input type="file" className="hidden" accept=".musicxml,.xml,.mxl" onChange={onUploadScore} disabled={uploadingScore} />
-                    </label>
                   </DropdownMenuItem>
                 )}
+                
+                <DropdownMenuItem onClick={handleShareToFeed} className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-zinc-700 dark:text-zinc-300 py-2.5 text-xs transition-colors flex items-center gap-2">
+                  <Share className="w-3.5 h-3.5" /> Share to Feed
+                </DropdownMenuItem>
+                
+                <DropdownMenuItem onClick={handleCopyLink} className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-zinc-700 dark:text-zinc-300 py-2.5 text-xs transition-colors flex items-center gap-2 mb-1">
+                  <Activity className="w-3.5 h-3.5" /> {shareCopied ? "Copied Link!" : "Copy Link"}
+                </DropdownMenuItem>
+
                 {isOwner && (
-                  <DropdownMenuItem onClick={onSave} disabled={saving} className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 py-2 mt-1 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-900 dark:text-white transition-colors">
-                    {saving ? "Saving..." : "Save Project"}
-                  </DropdownMenuItem>
+                  <>
+                    <div className="h-px bg-zinc-200 dark:bg-zinc-800 my-1 mx-2" />
+                    {onUploadCover && (
+                      <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()} className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-zinc-700 dark:text-zinc-300 py-2.5 text-xs transition-colors">
+                        <label className="flex w-full cursor-pointer items-center gap-2">
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          {uploadingCover ? "Uploading..." : "Upload Cover Art"}
+                          <input type="file" className="hidden" accept="image/*" onChange={(e) => {
+                             onUploadCover(e);
+                             // Let user close menu manually or auto-close if we had access to trigger state.
+                          }} disabled={uploadingCover} />
+                        </label>
+                      </DropdownMenuItem>
+                    )}
+                    {onUploadScore && (
+                      <DropdownMenuItem asChild onSelect={(e) => e.preventDefault()} className="cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 text-zinc-700 dark:text-zinc-300 py-2.5 text-xs transition-colors">
+                        <label className="flex w-full cursor-pointer items-center gap-2">
+                          <Music className="w-3.5 h-3.5" />
+                          {uploadingScore ? "Uploading..." : "+ MusicXML Score"}
+                          <input type="file" className="hidden" accept=".musicxml,.xml,.mxl" onChange={onUploadScore} disabled={uploadingScore} />
+                        </label>
+                      </DropdownMenuItem>
+                    )}
+                    
+                    {/* Expose Save/Publish internally on Mobile */}
+                    <DropdownMenuItem onClick={onSave} disabled={saving} className="sm:hidden cursor-pointer font-semibold hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:bg-zinc-100 dark:focus:bg-zinc-800 py-2.5 mt-1 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-900 dark:text-white transition-colors">
+                      {saving ? "Saving..." : "Save Project"}
+                    </DropdownMenuItem>
+                    {onPublish && !isPublished && (
+                      <DropdownMenuItem onClick={onPublish} disabled={publishing} className="sm:hidden cursor-pointer font-semibold hover:bg-[#C8A856]/10 focus:bg-[#C8A856]/10 py-2.5 text-xs text-[#C8A856] transition-colors">
+                        {publishing ? "Publishing..." : "Publish Project"}
+                      </DropdownMenuItem>
+                    )}
+                  </>
                 )}
               </DropdownMenuContent>
             </DropdownMenu>

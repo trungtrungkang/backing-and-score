@@ -11,6 +11,7 @@ import {
   followUser,
   unfollowUser,
   getReactionsCount,
+  getFileViewUrl,
   ProjectDocument,
   PlaylistDocument
 } from "@/lib/appwrite";
@@ -386,7 +387,11 @@ export default function UserProfilePage() {
                           <Link href={`/collection/${playlist.$id}`} key={playlist.$id} className="block group">
                              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-2xl overflow-hidden hover:shadow-xl hover:border-zinc-300 dark:hover:border-white/20 transition-all duration-300">
                                 <div className="h-32 bg-zinc-100 dark:bg-black/50 relative overflow-hidden flex items-center justify-center p-6 border-b border-zinc-200 dark:border-white/5">
-                                   <LayoutGrid className="w-12 h-12 text-zinc-300 dark:text-zinc-700 opacity-50" />
+                                   {playlist.coverImageId ? (
+                                      <img src={getFileViewUrl(playlist.coverImageId)} alt="cover" className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                                   ) : (
+                                      <LayoutGrid className="w-12 h-12 text-zinc-300 dark:text-zinc-700 opacity-50" />
+                                   )}
                                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 pointer-events-none mix-blend-overlay"></div>
                                 </div>
                                 <div className="p-5">

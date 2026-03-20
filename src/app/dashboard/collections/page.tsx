@@ -12,6 +12,7 @@ import {
   listMyPlaylists,
   createPlaylist,
   deletePlaylist,
+  getFileViewUrl,
   PlaylistDocument
 } from "@/lib/appwrite";
 import { Button } from "@/components/ui/button";
@@ -215,8 +216,12 @@ export default function CollectionsPage() {
                       >
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center shrink-0 border border-zinc-200 dark:border-zinc-700">
-                              <ListMusic className="w-5 h-5 text-blue-500" />
+                            <div className="w-12 h-12 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden shrink-0 border border-zinc-200 dark:border-zinc-700 relative">
+                              {pl.coverImageId ? (
+                                <img src={getFileViewUrl(pl.coverImageId).toString()} alt="cover" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                              ) : (
+                                <ListMusic className="w-5 h-5 text-blue-500 group-hover:scale-110 transition-transform duration-500" />
+                              )}
                             </div>
                             <div>
                               <div className="font-bold text-base text-zinc-900 dark:text-white mb-1">

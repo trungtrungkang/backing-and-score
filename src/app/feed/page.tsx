@@ -16,6 +16,7 @@ import {
   getComments,
   getCommentsCount,
   listMyProjects,
+  getFileViewUrl,
   PostDocument,
   ProjectDocument,
   PlaylistDocument,
@@ -413,11 +414,11 @@ export default function FeedPage() {
                          {/* Rich Attachment Card */}
                          {post.attachmentType === "project" && post.project && (
                            <div onClick={() => router.push(`/play/${post.project?.$id}`)} className="cursor-pointer border border-zinc-200 dark:border-white/10 rounded-xl overflow-hidden mb-3 hover:border-zinc-300 dark:hover:border-white/20 transition-all flex flex-col sm:flex-row bg-zinc-50 dark:bg-zinc-900">
-                              <div className="sm:w-32 sm:h-32 h-40 bg-zinc-200 dark:bg-black/50 overflow-hidden relative border-b sm:border-b-0 sm:border-r border-zinc-200 dark:border-white/10 shrink-0 flex items-center justify-center">
+                              <div className="sm:w-32 sm:h-32 h-40 bg-zinc-200 dark:bg-black/50 overflow-hidden relative border-b sm:border-b-0 sm:border-r border-zinc-200 dark:border-white/10 shrink-0 flex items-center justify-center group overflow-hidden">
                                  {post.project.coverUrl ? (
-                                    <img src={post.project.coverUrl} className="w-full h-full object-cover" alt="cover" />
+                                    <img src={post.project.coverUrl} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt="cover" />
                                  ) : (
-                                    <Music4 className="w-8 h-8 text-zinc-400" />
+                                    <Music4 className="w-8 h-8 text-zinc-400 transition-transform duration-500 group-hover:scale-110" />
                                  )}
                               </div>
                               <div className="p-3 sm:p-4 flex flex-col justify-center flex-1 min-w-0">
@@ -432,12 +433,11 @@ export default function FeedPage() {
 
                          {post.attachmentType === "playlist" && post.playlist && (
                            <div onClick={() => router.push(`/collection/${post.playlist?.$id}`)} className="cursor-pointer border border-zinc-200 dark:border-white/10 rounded-xl overflow-hidden mb-3 hover:border-zinc-300 dark:hover:border-white/20 transition-all flex flex-col sm:flex-row bg-zinc-50 dark:bg-zinc-900">
-                              <div className="sm:w-32 sm:h-32 h-40 bg-zinc-200 dark:bg-black/50 overflow-hidden relative border-b sm:border-b-0 sm:border-r border-zinc-200 dark:border-white/10 shrink-0 flex items-center justify-center">
+                              <div className="sm:w-32 sm:h-32 h-40 bg-zinc-200 dark:bg-black/50 overflow-hidden relative border-b sm:border-b-0 sm:border-r border-zinc-200 dark:border-white/10 shrink-0 flex items-center justify-center group overflow-hidden">
                                  {post.playlist.coverImageId ? (
-                                    // Placeholder for playlist image fetch
-                                    <ListMusic className="w-8 h-8 text-zinc-400" />
+                                    <img src={getFileViewUrl(post.playlist.coverImageId).toString()} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt="cover" />
                                  ) : (
-                                    <ListMusic className="w-8 h-8 text-zinc-400" />
+                                    <ListMusic className="w-8 h-8 text-zinc-400 transition-transform duration-500 group-hover:scale-110" />
                                  )}
                               </div>
                               <div className="p-3 sm:p-4 flex flex-col justify-center flex-1 min-w-0">
