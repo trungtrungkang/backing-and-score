@@ -443,8 +443,8 @@ export function PlayShell({
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden && isPlayingRef.current) {
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
-        if (isIOS) {
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (navigator.userAgent.includes("Mac") && "ontouchend" in document);
+        if (isMobile) {
            handlePause();
         }
       }
