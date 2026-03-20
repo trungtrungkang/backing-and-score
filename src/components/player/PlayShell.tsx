@@ -174,13 +174,6 @@ export function PlayShell({
       return;
     }
 
-    const currentOffsetMs = payload.metadata?.scoreSynthOffsetMs || 0;
-
-    if (playbackRate === 1.0 && pitchShift === 0 && currentOffsetMs === 0) {
-      setStretchedMidiBase64(midiBase64);
-      return;
-    }
-
     try {
       const binaryString = window.atob(midiBase64.split(",")[1] || midiBase64);
       const len = binaryString.length;
@@ -664,9 +657,10 @@ export function PlayShell({
         {scoreFileId ? (
           <MusicXMLVisualizer
             scoreFileId={scoreFileId}
-            positionMs={positionMs} // For measure highlighting
-            isPlaying={isPlaying} // Enables Playhead auto-scrolling
-            timemap={payload.notationData?.timemap || []} // Provide map
+            positionMs={positionMs}
+            isPlaying={isPlaying}
+            timemap={payload.notationData?.timemap || []}
+            measureMap={payload.notationData?.measureMap}
             onSeek={(ms) => handleSeek(ms)}
             onMidiExtracted={handleMidiExtracted}
             isDarkMode={isDarkMode}
