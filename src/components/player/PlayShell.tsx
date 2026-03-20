@@ -63,6 +63,8 @@ export function PlayShell({
 
   const activeNotesRef = useRef<Set<number>>(new Set());
   const isWaitModeRef = useRef(false);
+  const [isWaitModeLenient, setIsWaitModeLenient] = useState(false);
+  const isWaitModeLenientRef = useRef(false);
   const practiceTrackIdRef = useRef(-1);
   const practiceChordsRef = useRef<{ timeMs: number, notes: Set<number> }[]>([]);
   const targetChordIndexRef = useRef(0);
@@ -71,6 +73,7 @@ export function PlayShell({
 
   useEffect(() => { activeNotesRef.current = activeNotes; }, [activeNotes]);
   useEffect(() => { isWaitModeRef.current = isWaitMode; }, [isWaitMode]);
+  useEffect(() => { isWaitModeLenientRef.current = isWaitModeLenient; }, [isWaitModeLenient]);
   useEffect(() => { practiceTrackIdRef.current = practiceTrackId; }, [practiceTrackId]);
 
   const handleMidiExtracted = useCallback((base64: string) => {
@@ -430,9 +433,20 @@ export function PlayShell({
             
             const pressed = activeNotesRef.current;
             let allMatched = pressed.size > 0 && targetChord.notes.size > 0;
-            for (const n of targetChord.notes) {
-                if (!pressed.has(n)) {
-                    allMatched = false; break;
+            
+            if (isWaitModeLenientRef.current) {
+                allMatched = false;
+                for (const n of targetChord.notes) {
+                    if (pressed.has(n)) {
+                        allMatched = true;
+                        break;
+                    }
+                }
+            } else {
+                for (const n of targetChord.notes) {
+                    if (!pressed.has(n)) {
+                        allMatched = false; break;
+                    }
                 }
             }
             
@@ -520,15 +534,7 @@ export function PlayShell({
 
     // Auto-Stop Tripwire
     if (totalSongDurationMs > 0 && currentPos > totalSongDurationMs) {
-      setIsPlaying(false);
-      if (midiPlayerRef.current) {
-        midiPlayerRef.current.stop();
-        midiPlayerRef.current.currentTime = 0;
-      }
-      if (audioManagerRef.current) {
-        audioManagerRef.current.stop();
-      }
-      setPositionMs(0);
+      handleStop();
       
       // Auto-Advance logic
       if (isAutoplayEnabled && onNext) {
@@ -804,10 +810,10 @@ export function PlayShell({
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <div className="flex flex-col">
-            <h1 className="text-xl font-bold text-white drop-shadow-md tracking-tight leading-tight">
+            <h1 className="text-xl font-bold text-white drop-shadow-md tracking-tight leading-tight line-clamp-2">
               {projectName}
             </h1>
-            <span className="text-sm font-medium text-zinc-300 drop-shadow-sm">
+            <span className="hidden sm:block text-sm font-medium text-zinc-300 drop-shadow-sm line-clamp-1">
               {composer}
             </span>
           </div>
@@ -892,6 +898,8 @@ export function PlayShell({
         onAutoplayToggle={setIsAutoplayEnabled}
         isWaitMode={isWaitMode}
         onWaitModeToggle={setIsWaitMode}
+        isWaitModeLenient={isWaitModeLenient}
+        onWaitModeLenientToggle={setIsWaitModeLenient}
         isSynthMuted={payload.metadata?.scoreSynthMuted ?? false}
         onSynthMuteToggle={() => {}}
         midiTracks={parsedMidi ? parsedMidi.tracks.map((t: any, i: number) => ({ id: i, name: t.name || `Instrument ${i+1}` })) : []}

@@ -41,6 +41,8 @@ interface PlayerControlsProps {
   onAutoplayToggle?: (enabled: boolean) => void;
   isWaitMode?: boolean;
   onWaitModeToggle?: (enabled: boolean) => void;
+  isWaitModeLenient?: boolean;
+  onWaitModeLenientToggle?: (enabled: boolean) => void;
   isSynthMuted?: boolean;
   onSynthMuteToggle?: (muted: boolean) => void;
   midiTracks?: { id: number, name: string }[];
@@ -90,6 +92,8 @@ export function PlayerControls({
   onAutoplayToggle,
   isWaitMode,
   onWaitModeToggle,
+  isWaitModeLenient = false,
+  onWaitModeLenientToggle,
   isSynthMuted,
   onSynthMuteToggle,
   midiTracks,
@@ -245,6 +249,20 @@ export function PlayerControls({
                       </div>
                     </div>
                     
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Lenient (1+ Note)</span>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox"
+                          id="lenient-mode-toggle-popup"
+                          checked={isWaitModeLenient} 
+                          onChange={(e) => onWaitModeLenientToggle?.(e.target.checked)} 
+                          className="cursor-pointer w-4 h-4 accent-blue-500 rounded bg-zinc-200 dark:bg-white/10 border-zinc-300 dark:border-white/20 hover:border-zinc-400 dark:hover:border-white/40 focus:ring-0 transition-colors"
+                        />
+                        <label htmlFor="lenient-mode-toggle-popup" className="text-xs font-medium cursor-pointer">Enable</label>
+                      </div>
+                    </div>
+                    
                     {midiTracks && midiTracks.length > 0 && onPracticeTrackChange && (
                       <div className="flex flex-col gap-2">
                         <label htmlFor="practice-track-popup" className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Practice Part</label>
@@ -384,7 +402,7 @@ export function PlayerControls({
               <PopoverTrigger asChild>
                 <button className="h-8 px-3 rounded-md bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:border-zinc-400 dark:hover:border-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center gap-2">
                   <SlidersHorizontal className="w-4 h-4" />
-                  <span className="text-xs font-bold tracking-wider uppercase">Mixer</span>
+                  <span className="hidden sm:inline text-xs font-bold tracking-wider uppercase">Mixer</span>
                 </button>
               </PopoverTrigger>
               <PopoverContent 
