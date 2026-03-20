@@ -139,12 +139,10 @@ export default function DashboardPage() {
               Favorites
             </button>
             
-            {user.labels?.includes("admin") && (
-              <Link href="/dashboard/admin" className="flex items-center gap-3 px-3 py-2 mt-2 rounded-md border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 hover:text-white transition-colors">
-                <ShieldAlert className="w-4 h-4" />
-                Admin Panel
-              </Link>
-            )}
+            <Link href="/guide" className="flex items-center gap-3 px-3 py-2 mt-4 rounded-md hover:bg-zinc-800/50 text-zinc-400 hover:text-white transition-colors">
+              <Globe className="w-4 h-4" />
+              User Guide
+            </Link>
           </nav>
         </div>
         

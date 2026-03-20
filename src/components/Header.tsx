@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { Home, Library, Compass, Search, Bell, User, LogOut } from "lucide-react";
+import { Home, Library, Compass, Search, Bell, User, LogOut, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -51,6 +51,12 @@ export function Header() {
               <Compass className="w-[18px] h-[18px]" />
               Explore
             </Link>
+            {user?.labels?.includes("admin") && (
+              <Link href="/admin" className={`h-full flex px-2 items-center gap-2 text-sm font-extrabold transition-colors border-b-2 ${pathname.startsWith('/admin') ? 'text-red-500 border-red-500' : 'text-red-400/50 dark:text-red-900/50 border-transparent hover:text-red-500 dark:hover:text-red-500'}`}>
+                <ShieldAlert className="w-[18px] h-[18px]" />
+                Admin
+              </Link>
+            )}
         </nav>
 
         {/* Right Icons */}
