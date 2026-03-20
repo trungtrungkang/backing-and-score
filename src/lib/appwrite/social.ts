@@ -217,6 +217,18 @@ export async function getComments(postId: string): Promise<CommentDocument[]> {
   return documents as unknown as CommentDocument[];
 }
 
+export async function getCommentsCount(postId: string): Promise<number> {
+  if (!isAppwriteConfigured()) return 0;
+  const { total } = await databases.listDocuments(
+    APPWRITE_DATABASE_ID,
+    APPWRITE_COMMENTS_COLLECTION_ID,
+    [
+      clientQuery.equal("postId", postId)
+    ]
+  );
+  return total;
+}
+
 export async function toggleReaction(targetType: "post"|"comment"|"project"|"playlist", targetId: string, type: string = "like"): Promise<boolean> {
   if (!isAppwriteConfigured()) throw new Error("Appwrite not configured");
   const user = await account.get();
@@ -265,4 +277,24 @@ export async function getReactionsCount(targetType: "post"|"comment"|"project"|"
     // Note: Appwrite listDocuments 'total' is capped to limit+1 conventionally, but for small numbers it works perfectly.
     // However Appwrite 1.4+ fixed total counts if you just request 0 items.
     return total;
+}
+
+export async function checkIsReacted(targetType: "post"|"comment"|"project"|"playlist", targetId: string): Promise<boolean> {
+  if (!isAppwriteConfigured()) return false;
+  try {
+    const user = await account.get();
+    const { total } = await databases.listDocuments(
+      APPWRITE_DATABASE_ID,
+      APPWRITE_REACTIONS_COLLECTION_ID,
+      [
+        clientQuery.equal("targetType", targetType),
+        clientQuery.equal("targetId", targetId),
+        clientQuery.equal("userId", user.$id),
+        clientQuery.limit(1)
+      ]
+    );
+    return total > 0;
+  } catch {
+    return false;
+  }
 }

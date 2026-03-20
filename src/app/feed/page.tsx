@@ -11,8 +11,10 @@ import {
   getPlaylist,
   toggleReaction,
   getReactionsCount,
+  checkIsReacted,
   addComment,
   getComments,
+  getCommentsCount,
   listMyProjects,
   PostDocument,
   ProjectDocument,
@@ -27,14 +29,17 @@ import {
   Globe, Clock, PenTool, Image as ImageIcon, Send, X, Loader2
 } from "lucide-react";
 import { Music4 } from "lucide-react";
+import { getPublicProfile } from "@/app/actions/user";
 
 type EnrichedPost = PostDocument & {
+  authorProfile?: { name: string; prefs: any };
   authorName?: string;
   project?: ProjectDocument;
   playlist?: PlaylistDocument;
   likesCount?: number;
   isLiked?: boolean;
-  comments?: CommentDocument[];
+  commentsCount?: number;
+  comments?: (CommentDocument & { authorProfile?: { name: string; prefs: any } })[];
   loadingComments?: boolean;
 };
 
@@ -96,12 +101,25 @@ export default function FeedPage() {
             // Optimistically query server. In production, this data should be heavily cached or aggregated at DB layer.
             try { likesCount = await getReactionsCount("post", p.$id); } catch {}
 
+            let authorProfile;
+            try { authorProfile = await getPublicProfile(p.authorId); } catch {}
+
+            let commentsCount = 0;
+            try { commentsCount = await getCommentsCount(p.$id); } catch {}
+
+            let isLiked = false;
+            if (user) {
+               try { isLiked = await checkIsReacted("post", p.$id); } catch {}
+            }
+
             return {
               ...p,
               project,
               playlist,
+              authorProfile,
               likesCount,
-              isLiked: false, // Defaulting false, technically needs a separate index check.
+              commentsCount,
+              isLiked,
             };
           })
         );
@@ -180,7 +198,12 @@ export default function FeedPage() {
        setPosts(prev => prev.map((p, i) => i === postIndex ? { ...p, loadingComments: true } : p));
        try {
           const fetched = await getComments(postId);
-          setPosts(prev => prev.map((p, i) => i === postIndex ? { ...p, comments: fetched, loadingComments: false } : p));
+          const enrichedComments = await Promise.all(fetched.map(async (c) => {
+             let authorProfile;
+             try { authorProfile = await getPublicProfile(c.authorId); } catch {}
+             return { ...c, authorProfile };
+          }));
+          setPosts(prev => prev.map((p, i) => i === postIndex ? { ...p, comments: enrichedComments, loadingComments: false } : p));
        } catch {
           setPosts(prev => prev.map((p, i) => i === postIndex ? { ...p, loadingComments: false } : p));
        }
@@ -192,7 +215,14 @@ export default function FeedPage() {
     setIsSubmittingComment(true);
     try {
       const newC = await addComment(postId, commentText.trim());
-      setPosts(prev => prev.map((p, i) => i === postIndex ? { ...p, comments: [...(p.comments || []), newC] } : p));
+      let authorProfile;
+      try { authorProfile = await getPublicProfile(user.$id); } catch {}
+      const enrichedNewC = { ...newC, authorProfile };
+      setPosts(prev => prev.map((p, i) => i === postIndex ? { 
+         ...p, 
+         comments: [...(p.comments || []), enrichedNewC],
+         commentsCount: (p.commentsCount || 0) + 1 
+      } : p));
       setCommentText("");
     } catch {
       console.error("Failed to add comment");
@@ -312,8 +342,12 @@ export default function FeedPage() {
                 <article key={post.$id} className="p-4 sm:p-6 border-b border-zinc-200 dark:border-white/5 bg-white dark:bg-[#151518] hover:bg-zinc-50 dark:hover:bg-[#1a1c23] transition-colors">
                    <div className="flex gap-3 sm:gap-4">
                       {/* Avatar */}
-                      <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 flex items-center justify-center shrink-0 font-bold border border-indigo-200 dark:border-indigo-500/20">
-                         {post.authorId.substring(0,2).toUpperCase()}
+                      <div className="w-10 h-10 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 flex items-center justify-center shrink-0 font-bold border border-indigo-200 dark:border-indigo-500/20 relative overflow-hidden">
+                         {post.authorProfile?.prefs?.avatarUrl ? (
+                            <img src={post.authorProfile.prefs.avatarUrl} className="w-full h-full object-cover" alt="avatar" />
+                         ) : (
+                            post.authorProfile?.name ? post.authorProfile.name.substring(0,2).toUpperCase() : post.authorId.substring(0,2).toUpperCase()
+                         )}
                       </div>
                       
                       <div className="flex-1 flex flex-col min-w-0">
@@ -321,7 +355,7 @@ export default function FeedPage() {
                          <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-1.5 truncate">
                               <Link href={`/u/${post.authorId}`} className="font-bold text-zinc-900 dark:text-zinc-100 hover:underline hover:text-[#C8A856] truncate">
-                                User {post.authorId.substring(0, 8)}
+                                {post.authorProfile?.name || `User ${post.authorId.substring(0, 8)}`}
                               </Link>
                               <span className="text-zinc-400 dark:text-zinc-600 text-sm shrink-0">·</span>
                               <span className="text-zinc-400 dark:text-zinc-500 text-sm hover:underline cursor-pointer shrink-0">
@@ -398,7 +432,9 @@ export default function FeedPage() {
                                <div className={`p-1.5 rounded-full group-hover:bg-blue-500/10 transition-colors ${activeCommentPostId === post.$id ? 'bg-blue-500/10' : ''}`}>
                                   <MessageSquare className="w-4 h-4" />
                                </div>
-                               <span className={post.comments?.length ? '' : 'opacity-0'}>{post.comments?.length || 0}</span>
+                               <span className={(post.commentsCount || post.comments?.length || 0) > 0 ? '' : 'opacity-0'}>
+                                 {post.comments ? post.comments.length : (post.commentsCount || 0)}
+                               </span>
                             </button>
 
                             <button className="flex items-center gap-2 text-[13px] font-semibold transition-colors hover:text-green-500 group ml-auto">
@@ -419,12 +455,16 @@ export default function FeedPage() {
                                 <div className="flex flex-col gap-3">
                                   {post.comments.map(c => (
                                      <div key={c.$id} className="flex gap-2">
-                                        <div className="w-6 h-6 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center shrink-0 text-[10px] font-bold">
-                                           {c.authorId.substring(0,2).toUpperCase()}
+                                        <div className="mt-2.5 w-6 h-6 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center shrink-0 text-[10px] font-bold overflow-hidden relative">
+                                           {c.authorProfile?.prefs?.avatarUrl ? (
+                                              <img src={c.authorProfile.prefs.avatarUrl} className="w-full h-full object-cover" alt="avatar" />
+                                           ) : (
+                                              c.authorProfile?.name ? c.authorProfile.name.substring(0,2).toUpperCase() : c.authorId.substring(0,2).toUpperCase()
+                                           )}
                                         </div>
                                         <div className="flex-1 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl rounded-tl-sm p-3 text-sm">
                                            <div className="font-bold text-zinc-900 dark:text-zinc-300 mb-0.5 text-xs">
-                                              User {c.authorId.substring(0,6)} <span className="font-normal text-zinc-400 ml-1">{formatTimeAgo(c.$createdAt)}</span>
+                                              {c.authorProfile?.name || `User ${c.authorId.substring(0,6)}`} <span className="font-normal text-zinc-400 ml-1">{formatTimeAgo(c.$createdAt)}</span>
                                            </div>
                                            <div className="text-zinc-700 dark:text-zinc-400 whitespace-pre-wrap">{c.content}</div>
                                         </div>
@@ -435,8 +475,12 @@ export default function FeedPage() {
                               
                               {/* Composer */}
                               <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-500/20 flex items-center justify-center shrink-0 text-[10px] text-indigo-700 dark:text-indigo-400 font-bold">
-                                  {user.email?.substring(0,2).toUpperCase() || "MA"}
+                                <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-500/20 flex items-center justify-center shrink-0 text-[10px] text-indigo-700 dark:text-indigo-400 font-bold overflow-hidden relative">
+                                  {(user?.prefs as any)?.avatarUrl ? (
+                                    <img src={(user.prefs as any).avatarUrl} className="w-full h-full object-cover" alt="Avatar" />
+                                  ) : (
+                                    user.name ? user.name.substring(0,2).toUpperCase() : user.email?.substring(0,2).toUpperCase() || "ME"
+                                  )}
                                 </div>
                                 <Input 
                                   value={commentText}
@@ -477,19 +521,7 @@ export default function FeedPage() {
 
       {/* Right Sidebar (Trending/Suggestions) */}
       <aside className="w-[300px] p-6 hidden xl:flex flex-col gap-8 sticky top-16 h-[calc(100vh-4rem)] shrink-0">
-         <div className="bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200 dark:border-white/5 rounded-2xl p-5">
-            <h2 className="text-sm font-bold text-zinc-900 dark:text-white mb-4">Who to follow</h2>
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                 <div className="w-10 h-10 rounded-full bg-yellow-100 text-yellow-700 flex items-center justify-center font-bold">MO</div>
-                 <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold truncate">Mozart</div>
-                    <div className="text-xs text-zinc-500 truncate">@classical_king</div>
-                 </div>
-                 <Button variant="outline" size="sm" className="h-7 px-3 text-xs rounded-full font-bold">Follow</Button>
-              </div>
-            </div>
-         </div>
+          {/* Recommendation Engine omitted pending backend algorithms */}
       </aside>
 
       {/* Attachment Modal */}

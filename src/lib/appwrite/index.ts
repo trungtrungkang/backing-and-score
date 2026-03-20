@@ -67,6 +67,8 @@ export {
   checkIsFollowing,
   addComment,
   getComments,
+  getCommentsCount,
   toggleReaction,
   getReactionsCount,
+  checkIsReacted,
 } from "./social";
