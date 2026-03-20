@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { listPublished, copyProjectToMine, type ProjectDocument } from "@/lib/appwrite";
-import { Play, Bookmark, Music4, Search, SlidersHorizontal, ChevronRight, Pencil } from "lucide-react";
+import { listPublished, listPublishedPlaylists, copyProjectToMine, toggleFavorite, listMyFavorites, type ProjectDocument, type PlaylistDocument } from "@/lib/appwrite";
+import { Play, Bookmark, Music4, Search, SlidersHorizontal, ChevronRight, Pencil, Heart, ListMusic, LayoutGrid, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 
 function formatDate(iso: string | undefined) {
   if (!iso) return "";
@@ -29,12 +30,15 @@ export default function DiscoverPage() {
   const router = useRouter();
   const { user } = useAuth();
   const [projects, setProjects] = useState<ProjectDocument[]>([]);
+  const [playlists, setPlaylists] = useState<PlaylistDocument[]>([]);
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [favoritedIds, setFavoritedIds] = useState<Set<string>>(new Set());
+  const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
 
   const handleCopyToMine = async (e: React.MouseEvent, projectId: string) => {
     e.preventDefault();
@@ -57,21 +61,74 @@ export default function DiscoverPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listPublished(activeTags)
-      .then((list) => {
-        if (!cancelled) setProjects(list);
-      })
-      .catch((e) => {
-        if (!cancelled)
-          setError(e?.message ?? "Failed to load published projects");
-      })
-      .finally(() => {
+    
+    async function loadData() {
+      try {
+        const [publishedList, publishedCollections, myFavs] = await Promise.all([
+          listPublished(activeTags),
+          listPublishedPlaylists(),
+          user ? listMyFavorites("project") : Promise.resolve([])
+        ]);
+        
+        if (!cancelled) {
+          setProjects(publishedList);
+          setPlaylists(publishedCollections);
+          const favSet = new Set<string>();
+          myFavs.forEach(f => favSet.add(f.targetId));
+          setFavoritedIds(favSet);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "Failed to load published projects");
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    }
+    
+    loadData();
+    
     return () => {
       cancelled = true;
     };
-  }, [activeTags]);
+  }, [activeTags, user]);
+
+  const handleToggleFavorite = async (e: React.MouseEvent, projectId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!user || togglingFavId) return;
+    
+    setTogglingFavId(projectId);
+    
+    // Optimistic UI Update
+    const isCurrentlyFavorited = favoritedIds.has(projectId);
+    setFavoritedIds(prev => {
+      const next = new Set(prev);
+      if (isCurrentlyFavorited) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+
+    try {
+      const result = await toggleFavorite("project", projectId);
+      // Sync strictly to server state just in case of race condition
+      setFavoritedIds(prev => {
+        const next = new Set(prev);
+        if (result) next.add(projectId);
+        else next.delete(projectId);
+        return next;
+      });
+    } catch (err) {
+      // Revert Optimistic UI on Failure
+      setFavoritedIds(prev => {
+        const next = new Set(prev);
+        if (isCurrentlyFavorited) next.add(projectId);
+        else next.delete(projectId);
+        return next;
+      });
+      setError("Failed to sync favorite status");
+    } finally {
+      setTogglingFavId(null);
+    }
+  };
 
   const filteredProjects = projects.filter((p) => {
     if (!searchQuery) return true;
@@ -166,9 +223,48 @@ export default function DiscoverPage() {
         )}
 
 
+        {/* Featured Collections Section */}
+        {(!loading && playlists.length > 0 && !searchQuery) && (
+           <div className="mb-12">
+             <div className="w-full flex items-center justify-between mb-6">
+                <h2 className="text-[22px] font-bold text-zinc-900 dark:text-white tracking-tight">Featured Collections</h2>
+                <button className="text-[13px] font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors flex items-center gap-1">
+                  See All <ChevronRight className="w-4 h-4" />
+                </button>
+             </div>
+             
+             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+               {playlists.slice(0, 3).map((pl) => (
+                  <Link href={`/collection/${pl.$id}`} key={pl.$id} className="block group">
+                     <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-white/5 rounded-2xl overflow-hidden hover:shadow-xl hover:-translate-y-1 hover:border-zinc-300 dark:hover:border-white/20 transition-all duration-300">
+                        <div className="h-40 bg-zinc-100 dark:bg-black/50 relative overflow-hidden flex items-center justify-center p-6 border-b border-zinc-200 dark:border-white/5">
+                           <LayoutGrid className="w-16 h-16 text-zinc-300 dark:text-zinc-700 opacity-50 transition-transform duration-500 group-hover:scale-110" />
+                           <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-indigo-500/10 pointer-events-none mix-blend-overlay"></div>
+                           <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider text-white flex items-center gap-1.5 border border-white/10 shadow-lg">
+                              <Globe className="w-3 h-3 text-blue-400" /> PUBLIC
+                           </div>
+                        </div>
+                        <div className="p-5">
+                           <div className="flex items-center gap-2 text-[10px] font-bold text-blue-500 uppercase tracking-widest mb-2">
+                             <ListMusic className="w-3.5 h-3.5" /> Curated Playlist
+                           </div>
+                           <h3 className="text-xl font-bold text-zinc-900 dark:text-white mb-2 leading-tight group-hover:text-blue-500 transition-colors truncate">
+                              {pl.name}
+                           </h3>
+                           <p className="text-xs text-zinc-500 font-medium">
+                              By User {pl.ownerId.substring(0,6)} • {pl.projectIds?.length || 0} Tracks
+                           </p>
+                        </div>
+                     </div>
+                  </Link>
+               ))}
+             </div>
+           </div>
+        )}
+
         {/* Featured Section Header */}
         <div className="w-full flex items-center justify-between mb-6 mt-4">
-          <h2 className="text-[22px] font-bold text-zinc-900 dark:text-white tracking-tight">Featured Sheet Music</h2>
+          <h2 className="text-[22px] font-bold text-zinc-900 dark:text-white tracking-tight">Interactive Scores</h2>
           <button className="text-[13px] font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors flex items-center gap-1">
             See All <ChevronRight className="w-4 h-4" />
           </button>
@@ -205,9 +301,10 @@ export default function DiscoverPage() {
               return (
               <li 
                 key={p.$id} 
-                className="group p-4 bg-white dark:bg-[#1A1A1E] border border-white/5 rounded-[20px] transition-all duration-300 flex flex-col hover:-translate-y-1 hover:shadow-2xl hover:shadow-black/50"
+                className="group bg-white dark:bg-[#1A1A1E] border border-white/5 rounded-[20px] transition-all duration-300 flex flex-col hover:-translate-y-1 hover:shadow-2xl hover:shadow-black/50 relative"
               >
-                <div className="flex-1 flex flex-col relative w-full">
+                <Link href={`/play/${p.$id}`} className="absolute inset-0 z-0 rounded-[20px]" aria-label={`Play ${p.name}`}></Link>
+                <div className="p-4 flex-1 flex flex-col relative w-full pointer-events-none">
                   
                   {/* Inner Image Container */}
                   <div className="relative w-full aspect-[4/3] rounded-[14px] overflow-hidden mb-5 bg-white shadow-inner flex items-center justify-center">
@@ -264,22 +361,26 @@ export default function DiscoverPage() {
                 </div>
 
                 {/* Divider */}
-                <div className="w-full h-px bg-white/5 mb-4"></div>
+                <div className="w-full h-px bg-white/5 mb-4 pointer-events-none"></div>
 
                 {/* Footer Actions */}
-                <div className="flex items-center justify-between w-full">
-                  <Link href={`/play/${p.$id}`}>
-                    <button className="px-5 py-2 rounded-full border border-zinc-300 dark:border-white/10 text-[13px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors">
-                      Preview Score
-                    </button>
-                  </Link>
-
+                <div className="flex items-center justify-end w-full px-4 pb-4 relative z-10">
                   <div className="flex items-center gap-1.5">
-                    <Link href={`/play/${p.$id}`}>
-                      <button className="w-9 h-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors group-hover:text-[#C8A856]">
-                        <Play className="w-[18px] h-[18px] ml-0.5" />
+                    <ProjectActionsMenu projectId={p.$id} hideFavorite={true} />
+                    {user && (
+                      <button 
+                        onClick={(e) => handleToggleFavorite(e, p.$id)}
+                        disabled={togglingFavId === p.$id}
+                        title={favoritedIds.has(p.$id) ? "Remove from Favorites" : "Add to Favorites"}
+                        className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${
+                          favoritedIds.has(p.$id) 
+                            ? "text-rose-500 bg-rose-500/10 hover:bg-rose-500/20" 
+                            : "text-zinc-500 dark:text-zinc-400 hover:text-rose-500 hover:bg-zinc-100 dark:hover:bg-white/5"
+                        }`}
+                      >
+                         <Heart className={`w-[18px] h-[18px] transition-all ${favoritedIds.has(p.$id) ? 'fill-current scale-110' : ''}`} />
                       </button>
-                    </Link>
+                    )}
                     {user && user.$id === p.userId && (
                       <>
                         <Link href={`/p/${p.$id}`}>

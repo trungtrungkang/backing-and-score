@@ -13,6 +13,7 @@ import {
 import { useTheme } from "next-themes";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { getFileViewUrl } from "@/lib/appwrite";
+import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 import type { DAWPayload, AudioTrack } from "@/lib/daw/types";
 import { AudioManager, type TrackParams } from "@/lib/audio/AudioManager";
 import { Midi } from "@tonejs/midi";
@@ -1049,6 +1050,7 @@ export function EditorShell({
         )}
 
         <div className="flex-1 flex items-center justify-end gap-3 shrink-0">
+          {projectId && <ProjectActionsMenu projectId={projectId} />}
           
           {/* Desktop/Tablet Inline Menu */}
           <div className="hidden xl:flex items-center gap-3">

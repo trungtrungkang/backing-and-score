@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
   getProject,
+  getPlaylist,
   type ProjectDocument,
 } from "@/lib/appwrite";
 import { PlayShell } from "@/components/player/PlayShell";
@@ -16,11 +17,20 @@ import {
 
 export default function PlayProjectPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  
   const projectId = params.projectId as string;
+  const playlistId = searchParams.get("list");
+
   const [project, setProject] = useState<ProjectDocument | null>(null);
   const [payload, setPayload] = useState<DAWPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Playlist Context
+  const [nextProjectId, setNextProjectId] = useState<string | null>(null);
+  const [prevProjectId, setPrevProjectId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -29,6 +39,22 @@ export default function PlayProjectPage() {
     try {
       const doc = await getProject(projectId);
       setProject(doc);
+      
+      if (playlistId) {
+         try {
+            const pl = await getPlaylist(playlistId);
+            if (pl.projectIds) {
+               const idx = pl.projectIds.indexOf(projectId);
+               if (idx !== -1) {
+                  if (idx > 0) setPrevProjectId(pl.projectIds[idx - 1]);
+                  if (idx < pl.projectIds.length - 1) setNextProjectId(pl.projectIds[idx + 1]);
+               }
+            }
+         } catch {
+            console.warn("Failed to load playlist context");
+         }
+      }
+
       try {
         const raw = JSON.parse(doc.payload) as Record<string, unknown> | null;
         setPayload(normalizePayload(raw));
@@ -82,6 +108,12 @@ export default function PlayProjectPage() {
         composer={project.creatorEmail || "Unknown Composer"}
         payload={payload}
         difficulty={project.difficulty}
+        playlistId={playlistId}
+        nextProjectId={nextProjectId}
+        prevProjectId={prevProjectId}
+        onNext={() => nextProjectId && router.push(`/play/${nextProjectId}?list=${playlistId}&autoplay=true`)}
+        onPrev={() => prevProjectId && router.push(`/play/${prevProjectId}?list=${playlistId}&autoplay=true`)}
+        autoplayOnLoad={searchParams.get("autoplay") === "true"}
       />
     </main>
   );

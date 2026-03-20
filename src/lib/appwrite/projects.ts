@@ -115,12 +115,13 @@ export async function listMyProjects(tagFilters?: string[]): Promise<ProjectDocu
 }
 
 /** List published projects for Discovery. */
-export async function listPublished(tagFilters?: string[]): Promise<ProjectDocument[]> {
+export async function listPublished(tagFilters?: string[], authorId?: string): Promise<ProjectDocument[]> {
   const queries = [
     Query.equal("published", true),
     Query.orderDesc("publishedAt"),
     Query.limit(50),
   ];
+  if (authorId) queries.push(Query.equal("userId", authorId));
   if (tagFilters && tagFilters.length > 0) {
     tagFilters.forEach(tag => {
       if (tag !== "All") queries.push(Query.contains("tags", [tag]));

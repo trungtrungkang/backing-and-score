@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { PlayerControls } from "./PlayerControls";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "next-themes";
+import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 
 export interface PlayShellProps {
   projectId: string;
@@ -19,6 +20,12 @@ export interface PlayShellProps {
   composer?: string;
   payload: DAWPayload;
   difficulty?: number;
+  playlistId?: string | null;
+  nextProjectId?: string | null;
+  prevProjectId?: string | null;
+  onNext?: () => void;
+  onPrev?: () => void;
+  autoplayOnLoad?: boolean;
 }
 
 export function PlayShell({
@@ -27,6 +34,12 @@ export function PlayShell({
   composer,
   payload,
   difficulty,
+  playlistId,
+  nextProjectId,
+  prevProjectId,
+  onNext,
+  onPrev,
+  autoplayOnLoad
 }: PlayShellProps) {
   const audioManagerRef = useRef<AudioManager | null>(null);
   const { resolvedTheme } = useTheme();
@@ -69,6 +82,7 @@ export function PlayShell({
   const [durationMs, setDurationMs] = useState(0);
   const requestRef = useRef<number>(0);
   const prevFilesRef = useRef<string | null>(null);
+  const autoplayTriggeredRef = useRef(false);
 
   // Mixer State
   const [muteByTrackId, setMuteByTrackId] = useState<Record<string, boolean>>({});
@@ -79,6 +93,7 @@ export function PlayShell({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [pitchShift, setPitchShift] = useState(0);
   const [isMetronomeEnabled, setIsMetronomeEnabled] = useState(false);
+  const [isAutoplayEnabled, setIsAutoplayEnabled] = useState(true);
   const [isControlsCollapsed, setIsControlsCollapsed] = useState(false);
 
   const [loopState, setLoopState] = useState<{enabled: boolean; startBar: number; endBar: number}>({ 
@@ -270,6 +285,11 @@ export function PlayShell({
       if (!loading) {
         setLoadingAudio(false);
         setDurationMs(audioManagerRef.current.getDurationMs());
+        
+        if (autoplayOnLoad && !autoplayTriggeredRef.current) {
+           autoplayTriggeredRef.current = true;
+           handlePlay();
+        }
       }
     });
   }, [payload.audioTracks]);
@@ -352,6 +372,14 @@ export function PlayShell({
         audioManagerRef.current.stop();
       }
       setPositionMs(0);
+      
+      // Auto-Advance logic
+      if (isAutoplayEnabled && onNext) {
+         // Break out of strict execution loop to allow React unmount
+         setTimeout(() => {
+            onNext();
+         }, 50);
+      }
       return;
     }
 
@@ -606,7 +634,8 @@ export function PlayShell({
             </span>
           </div>
         </div>
-        <div className="pointer-events-auto">
+        <div className="flex items-center gap-2 pointer-events-auto">
+          <ProjectActionsMenu projectId={projectId} />
           <ThemeToggle hideBg className="p-2 w-10 h-10 rounded-full bg-[#1e1e24]/80 text-zinc-300 hover:text-white hover:bg-[#2a2a32] backdrop-blur-md transition-all border-none" />
         </div>
       </header>
@@ -672,6 +701,13 @@ export function PlayShell({
         onVolumeChange={handleVolumeChange}
         isCollapsed={isControlsCollapsed}
         onCollapseToggle={setIsControlsCollapsed}
+        playlistId={playlistId}
+        hasNext={!!nextProjectId}
+        hasPrev={!!prevProjectId}
+        onNext={onNext}
+        onPrev={onPrev}
+        isAutoplayEnabled={isAutoplayEnabled}
+        onAutoplayToggle={setIsAutoplayEnabled}
       />
     </div>
   );

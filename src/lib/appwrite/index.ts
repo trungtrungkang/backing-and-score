@@ -12,10 +12,21 @@ export {
 export {
   APPWRITE_DATABASE_ID,
   APPWRITE_PROJECTS_COLLECTION_ID,
+  APPWRITE_PLAYLISTS_COLLECTION_ID,
+  APPWRITE_FAVORITES_COLLECTION_ID,
   APPWRITE_UPLOADS_BUCKET_ID,
   isAppwriteConfigured,
 } from "./constants";
-export type { ProjectDocument, ProjectPayload } from "./types";
+export type { 
+  ProjectDocument, 
+  ProjectPayload, 
+  PlaylistDocument, 
+  FavoriteDocument,
+  PostDocument,
+  CommentDocument,
+  ReactionDocument,
+  FollowDocument
+} from "./types";
 export {
   createProject,
   updateProject,
@@ -30,3 +41,32 @@ export {
   getFileViewUrl,
   openFileInNewTab,
 } from "./upload";
+
+export {
+  createPlaylist,
+  updatePlaylist,
+  getPlaylist,
+  listMyPlaylists,
+  listPublishedPlaylists,
+  addProjectToPlaylist,
+  removeProjectFromPlaylist,
+  deletePlaylist,
+} from "./playlists";
+
+export {
+  toggleFavorite,
+  checkIsFavorited,
+  listMyFavorites,
+} from "./favorites";
+
+export {
+  createPost,
+  getTimeline,
+  followUser,
+  unfollowUser,
+  checkIsFollowing,
+  addComment,
+  getComments,
+  toggleReaction,
+  getReactionsCount,
+} from "./social";

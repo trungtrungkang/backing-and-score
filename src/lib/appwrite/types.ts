@@ -30,3 +30,61 @@ export interface ProjectDocument {
 }
 
 export type ProjectPayload = Record<string, any>;
+
+export interface PlaylistDocument {
+  $id: string;
+  $createdAt: string;
+  $updatedAt: string;
+  ownerId: string;
+  name: string;
+  description?: string;
+  isPublished: boolean;
+  coverImageId?: string;
+  projectIds: string[];
+}
+
+export interface FavoriteDocument {
+  $id: string;
+  $createdAt: string;
+  $updatedAt: string;
+  userId: string;
+  targetType: "project" | "playlist";
+  targetId: string;
+}
+
+export interface PostDocument {
+  $id: string;
+  $createdAt: string;
+  $updatedAt: string;
+  authorId: string;
+  content?: string;
+  attachmentType?: "project" | "playlist" | "none";
+  attachmentId?: string;
+}
+
+export interface CommentDocument {
+  $id: string;
+  $createdAt: string;
+  $updatedAt: string;
+  postId: string;
+  authorId: string;
+  content: string;
+}
+
+export interface ReactionDocument {
+  $id: string;
+  $createdAt: string;
+  $updatedAt: string;
+  targetType: "post" | "comment" | "project" | "playlist";
+  targetId: string;
+  userId: string;
+  type: string;
+}
+
+export interface FollowDocument {
+  $id: string;
+  $createdAt: string;
+  $updatedAt: string;
+  followerId: string;
+  followingId: string;
+}
