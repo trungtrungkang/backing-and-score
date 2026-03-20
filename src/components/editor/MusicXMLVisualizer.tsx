@@ -452,6 +452,11 @@ export function MusicXMLVisualizer({
 
   // Dynamic Viewport Forward Tracker (Resolves implicit missing Measure Strings natively)
   const executeDOMForwardEdgeScroll = useCallback((container: Element) => {
+    // CRITICAL GUARD: Only execute DOM edge-tracking logic if we are formally within Wait Mode.
+    // In Normal Mode, the mathematical timeline interpolation engine guarantees perfect highlight/scroll sync natively.
+    const isActuallyWaitMode = document.getElementById("musicxml-container")?.classList.contains("wait-mode-active");
+    if (!isActuallyWaitMode) return;
+    
     const activeNodes = container.querySelectorAll(".wait-mode-missed, .note-playing-correct");
     if (activeNodes.length === 0) return;
 
@@ -460,13 +465,6 @@ export function MusicXMLVisualizer({
 
     if (maxMeasureNode) {
       const measureEl = maxMeasureNode as Element;
-      container.querySelectorAll(".active-measure").forEach(el => el.classList.remove("active-measure"));
-      
-      // CRITICAL FIX: Bypass stale useCallback closure scoping natively evaluating "isWaitMode" prop as 'false'
-      const isActuallyWaitMode = document.getElementById("musicxml-container")?.classList.contains("wait-mode-active");
-      if (!isActuallyWaitMode) {
-        measureEl.classList.add("active-measure");
-      }
 
       const sys = measureEl.closest('.system');
       const finalTarget = sys || measureEl;
