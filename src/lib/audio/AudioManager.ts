@@ -57,6 +57,18 @@ export class AudioManager {
       if (typeof window !== "undefined") {
         this.context = new (window.AudioContext || (window as any).webkitAudioContext)();
         this.metronome = new MetronomeEngine(this.context);
+        
+        // Listen for OS-level interrupts (e.g. iOS screen lock or backgrounding)
+        this.context.onstatechange = () => {
+           console.log("[AudioManager] OS AudioContext state change:", this.context?.state);
+           if (this.context?.state === 'suspended' || this.context?.state === 'interrupted') {
+               // If the OS forcibly paused the audio hardware, we must sync our logical state
+               if (this.isPlaying) {
+                   console.warn("[AudioManager] iOS suspended audio hardware. Forcing internal pause.");
+                   this.pause();
+               }
+           }
+        };
       } else {
         throw new Error("AudioManager can only be initialized in the browser.");
       }
