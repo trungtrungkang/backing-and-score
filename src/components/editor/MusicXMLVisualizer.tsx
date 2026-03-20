@@ -138,7 +138,24 @@ export function MusicXMLVisualizer({ scoreFileId, positionMs = 0, isPlaying = fa
             }
             return match;
         });
-        await proxy.loadData(patchedText);
+        
+        // Fix Verovio multi-staff Key Signature Modulation bug.
+        // Verovio's MIDI builder drops structural flats/sharps during a key change on multi-staff instruments. 
+        // We forcefully convert Sibelius's reliable <alter> tags into explicit XML <accidental> nodes solely for the MIDI extraction phase!
+        const midiText = patchedText.replace(/<pitch>\s*<step>([A-G])<\/step>\s*<alter>(-?1|-?2)<\/alter>\s*<octave>(\d)<\/octave>\s*<\/pitch>/g, (match, step, alter) => {
+            let accidental = '';
+            if (alter === '-1') accidental = 'flat';
+            else if (alter === '1') accidental = 'sharp';
+            else if (alter === '-2') accidental = 'flat-flat';
+            else if (alter === '2') accidental = 'double-sharp';
+            
+            if (accidental) {
+                return match + `\n<accidental>${accidental}</accidental>`;
+            }
+            return match;
+        });
+
+        await proxy.loadData(midiText);
         if (canceled) return;
 
         // Render to MIDI
