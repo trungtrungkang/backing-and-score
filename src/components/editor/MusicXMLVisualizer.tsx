@@ -130,6 +130,16 @@ export function MusicXMLVisualizer({ scoreFileId, positionMs = 0, isPlaying = fa
         const svg = await proxy.renderToSVG(1);
         if (canceled) return;
 
+        // --- ISOLATED MIDI GENERATION THREAD ---
+        // Spawn a completely temporary, secondary Web Worker exclusively for MIDI extraction.
+        // This guarantees that the main SVG UI worker is NEVER polluted by our aggressive XML mutations!
+        const midiWorkerUrl = "/dist/verovio/verovio-worker.js";
+        const midiWorker = new Worker(midiWorkerUrl);
+        midiWorker.postMessage({
+          verovioUrl: "https://www.verovio.org/javascript/latest/verovio-toolkit-wasm.js"
+        });
+        const midiProxy = new VerovioWorkerProxy(midiWorker) as unknown as IVerovioWorkerProxy;
+
         // Fix Sibelius 2/4 Whole Rest export bug for Verovio MIDI builder
         // Stripping <type>whole</type> from rest blocks forces the MIDI sequence to use the exact raw <duration> mapping
         const patchedText = text.replace(/<note[^>]*>([\s\S]*?)<\/note>/g, (match, inner) => {
@@ -140,29 +150,29 @@ export function MusicXMLVisualizer({ scoreFileId, positionMs = 0, isPlaying = fa
         });
         
         // Fix Verovio multi-staff Key Signature Modulation bug.
-        // Verovio's MIDI builder drops structural flats/sharps during a key change on multi-staff instruments. 
-        // We forcefully convert Sibelius's reliable <alter> tags into explicit XML <accidental> nodes solely for the MIDI extraction phase!
-        const midiText = patchedText.replace(/<pitch>\s*<step>([A-G])<\/step>\s*<alter>(-?1|-?2)<\/alter>\s*<octave>(\d)<\/octave>\s*<\/pitch>/g, (match, step, alter) => {
+        // Verovio's MIDI builder drops structural flats/sharps during a key change on multi-staff instruments.
+        // Furthermore, it permanently gets stuck on the INITIAL key signature, severely mangling natural diatonic notes.
+        // We forcefully convert Sibelius's reliable absolute <alter> logic into explicit XML <accidental> nodes solely for the MIDI extraction phase, completely neutralizing Verovio's internal Key Signature dependence.
+        const midiText = patchedText.replace(/<pitch>([\s\S]*?)<\/pitch>/g, (match, inner) => {
             let accidental = '';
-            if (alter === '-1') accidental = 'flat';
-            else if (alter === '1') accidental = 'sharp';
-            else if (alter === '-2') accidental = 'flat-flat';
-            else if (alter === '2') accidental = 'double-sharp';
             
-            if (accidental) {
-                return match + `\n<accidental>${accidental}</accidental>`;
-            }
-            return match;
+            if (inner.includes('<alter>-1</alter>')) accidental = 'flat';
+            else if (inner.includes('<alter>1</alter>')) accidental = 'sharp';
+            else if (inner.includes('<alter>-2</alter>')) accidental = 'flat-flat';
+            else if (inner.includes('<alter>2</alter>')) accidental = 'double-sharp';
+            else accidental = 'natural'; // If <alter> is missing, Sibelius designates a strictly Natural white-key pitch!
+            
+            return match + `\n<accidental>${accidental}</accidental>`;
         });
 
-        await proxy.loadData(midiText);
-        if (canceled) return;
-
-        // Render to MIDI
-        const midiStr = await proxy.renderToMIDI();
+        await midiProxy.loadData(midiText);
+        let midiStr = '';
+        if (!canceled) {
+            midiStr = await midiProxy.renderToMIDI();
+        }
+        midiWorker.terminate(); // Destroy the disposable worker immediately!
         
-        // Restore SVG-friendly visual XML state (safeguard)
-        await proxy.loadData(text);
+        if (canceled) return;
         
         if (onMidiExtracted && midiStr) {
           onMidiExtracted('data:audio/midi;base64,' + midiStr);
