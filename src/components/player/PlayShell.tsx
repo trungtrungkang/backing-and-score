@@ -542,7 +542,7 @@ export function PlayShell({
         // Wait Mode Completion Celebrate phase: DO NOT rewind aggressively right as the user hits the last chord!
         if (!endOfTrackTimeoutRef.current) {
            endOfTrackTimeoutRef.current = setTimeout(() => {
-              handleStop();
+              handleStop(true);
               endOfTrackTimeoutRef.current = null;
               if (isAutoplayEnabled && onNext) {
                  onNext();
@@ -552,7 +552,7 @@ export function PlayShell({
         return; // Suspend clock tracking safely.
       }
 
-      handleStop();
+      handleStop(true);
       
       // Auto-Advance logic
       if (isAutoplayEnabled && onNext) {
@@ -639,20 +639,25 @@ export function PlayShell({
   }, [payload.audioTracks.length, stretchedMidiBase64, payload.metadata?.scoreSynthMuted, positionMs, midiStartOffsetMs, payload.metadata?.scoreSynthOffsetMs]);
 
   const handlePause = useCallback(() => {
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    
     if (midiTimeoutRef.current) clearTimeout(midiTimeoutRef.current);
     if (endOfTrackTimeoutRef.current) {
        clearTimeout(endOfTrackTimeoutRef.current);
        endOfTrackTimeoutRef.current = null;
     }
 
-    if (midiPlayerRef.current) {
-      midiPlayerRef.current.stop(); // html-midi-player doesn't have pause(), stop() pauses it.
+    try {
+        if (midiPlayerRef.current) {
+          midiPlayerRef.current.stop(); // html-midi-player doesn't have pause(), stop() pauses it.
+        }
+        if (audioManagerRef.current && payload.audioTracks.length > 0) {
+          audioManagerRef.current.pause();
+        }
+    } catch (e) {
+        console.error("[PlayShell] handlePause media interceptor error:", e);
     }
-    if (audioManagerRef.current && payload.audioTracks.length > 0) {
-      audioManagerRef.current.pause();
-    }
-    setIsPlaying(false);
-    isPlayingRef.current = false;
 
     if (audioManagerRef.current && payload.audioTracks.length > 0) {
       setPositionMs(audioManagerRef.current.getCurrentPositionMs()); // force update
@@ -709,7 +714,7 @@ export function PlayShell({
     setPositionMs(ms);
   }, [payload.audioTracks.length, midiStartOffsetMs, payload.metadata?.scoreSynthOffsetMs, payload.metadata?.scoreSynthMuted]);
 
-  const handleStop = useCallback(() => {
+  const handleStop = useCallback((isEndOfTrack: boolean = false) => {
     handlePause();
     
     // WAIT MODE AGGRESSIVE RESET
@@ -732,13 +737,13 @@ export function PlayShell({
     const startOfMeasureMs = currentMeasureIndex * measureMs;
     
     // Complete hard-reset if stopping at the absolute extreme bounds of the track
-    if (positionMs - startOfMeasureMs < 150 || positionMs >= totalSongDurationMs - 1500) {
+    if (isEndOfTrack === true || positionMs - startOfMeasureMs < 150 || positionMs >= totalSongDurationMs - 1500) {
       targetChordIndexRef.current = 0; // Aggressive React-independent lock
       handleSeek(0);
     } else {
       handleSeek(startOfMeasureMs);
     }
-  }, [handlePause, handleSeek, payload.metadata?.tempo, payload.metadata?.timeSignature, positionMs]);
+  }, [handlePause, handleSeek, payload.metadata?.tempo, payload.metadata?.timeSignature, positionMs, totalSongDurationMs]);
 
   // Spacebar hotkey for Play/Pause
   useEffect(() => {
