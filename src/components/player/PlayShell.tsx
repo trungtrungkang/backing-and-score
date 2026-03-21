@@ -15,6 +15,22 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme } from "next-themes";
 import { ProjectActionsMenu } from "@/components/ProjectActionsMenu";
 
+// Physical measureMap acts as anchor points. Offsets are interpolated until the next anchor.
+function getPhysicalMeasure(latent: number, measureMap?: Record<number, number>): number {
+  if (!measureMap) return latent;
+  
+  let bestLatentAnchor = 1;
+  for (const k of Object.keys(measureMap)) {
+    const lat = parseInt(k, 10);
+    if (lat <= latent && lat >= bestLatentAnchor) {
+      bestLatentAnchor = lat;
+    }
+  }
+  
+  const offset = latent - bestLatentAnchor;
+  return measureMap[bestLatentAnchor] + offset;
+}
+
 export interface PlayShellProps {
   projectId: string;
   projectName: string;
@@ -68,25 +84,42 @@ export function PlayShell({
   const [isWaitModeLenient, setIsWaitModeLenient] = useState(false);
   const isWaitModeLenientRef = useRef(false);
   const practiceTrackIdRef = useRef(-1);
-  const practiceChordsRef = useRef<{ timeMs: number, notes: Set<number> }[]>([]);
+  const practiceChordsRef = useRef<{ timeMs: number, notes: Set<number>, measure?: number }[]>([]);
   const targetChordIndexRef = useRef(0);
   const isWaitingRef = useRef(false);
   const releasedPitchesRef = useRef<Set<number>>(new Set());
   const waitModeMonitorRef = useRef<HTMLDivElement>(null);
+  const parsedMidiRef = useRef<any>(null); // Added for direct MIDI access
 
   useEffect(() => { activeNotesRef.current = activeNotes; }, [activeNotes]);
   useEffect(() => { isWaitModeRef.current = isWaitMode; }, [isWaitMode]);
   useEffect(() => { isWaitModeLenientRef.current = isWaitModeLenient; }, [isWaitModeLenient]);
   useEffect(() => { practiceTrackIdRef.current = practiceTrackId; }, [practiceTrackId]);
 
-  const handleMidiExtracted = useCallback((base64: string) => {
-    setMidiBase64(base64);
+  // 1. Establish a Timeline Resolver computing Measure boundaries based on physical MIDI extraction
+  const timemap = payload.notationData?.timemap || [];
+  const getMeasureForTime = useCallback((timeMs: number) => {
+    let measure = 1;
+    for (const t of timemap) {
+      if (timeMs >= t.timeMs - 50) { // Allow a small buffer for timing discrepancies
+        measure = t.measure;
+      } else {
+        break;
+      }
+    }
+    return measure;
+  }, [timemap]);
+
+  const handleMidiExtracted = useCallback((base64Midi: string) => {
+    setMidiBase64(base64Midi);
     try {
-      const binaryString = window.atob(base64.split(",")[1] || base64);
+      const binaryString = window.atob(base64Midi.split(",")[1] || base64Midi);
       const len = binaryString.length;
       const bytes = new Uint8Array(len);
       for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
       const midi = new Midi(bytes);
+      parsedMidiRef.current = midi; // Store parsed MIDI in ref
+
       let minMs = Infinity;
       let maxMs = 0;
       midi.tracks.forEach(t => t.notes.forEach(n => {
@@ -94,14 +127,18 @@ export function PlayShell({
         if ((n.time + n.duration) * 1000 > maxMs) maxMs = (n.time + n.duration) * 1000;
       }));
       setMidiStartOffsetMs(minMs === Infinity ? 0 : minMs);
-      setMidiDurationMs(maxMs);
-      setParsedMidi(midi);
+      setMidiDurationMs(maxMs); // Corrected from setDurationMs
+
+      setParsedMidi(midi); // Keep state for other effects
+
     } catch (err) {
       console.error("Failed to parse initial MIDI offset", err);
       setMidiStartOffsetMs(0);
       setMidiDurationMs(0);
+      setParsedMidi(null);
+      practiceChordsRef.current = [];
     }
-  }, []);
+  }, [getMeasureForTime, practiceTrackId]);
 
   // Playback State
   const [isPlaying, setIsPlaying] = useState(false);
@@ -134,38 +171,43 @@ export function PlayShell({
   }, []);
 
   // --- WAIT MODE V2 Core Progression Logic ---
+  // Rebuild the target evaluation tracker reactively every time practiceTrackId explicitly alters natively!
   useEffect(() => {
-    if (!parsedMidi) {
-      practiceChordsRef.current = [];
+    if (!parsedMidi) { 
       return;
     }
 
     let tracksToParse: any[] = [];
-    if (practiceTrackId < 0) {
-      tracksToParse = parsedMidi.tracks.filter((t: any) => t.notes.length > 0).slice(0, 2);
+    if (typeof practiceTrackId !== "number" || practiceTrackId < 0) {
+      tracksToParse = parsedMidi.tracks.filter((t: any) => t.notes.length > 0);
     } else if (parsedMidi.tracks[practiceTrackId]) {
       tracksToParse.push(parsedMidi.tracks[practiceTrackId]);
     }
 
-    const chords: { timeMs: number, notes: Set<number> }[] = [];
+    const chords: { timeMs: number, notes: Set<number>, measure: number }[] = [];
     
+    const measureMap = payload.notationData?.measureMap;
+
     tracksToParse.forEach(track => {
       track.notes.forEach((n: any) => {
         const timeMs = n.time * 1000;
+        const latentMeasure = getMeasureForTime(timeMs);
+        const physicalMeasure = getPhysicalMeasure(latentMeasure, measureMap);
+        
         const existing = chords.find(c => Math.abs(c.timeMs - timeMs) < 20);
         if (existing) {
           existing.notes.add(n.midi);
         } else {
-          chords.push({ timeMs, notes: new Set([n.midi]) });
+          chords.push({ timeMs, notes: new Set([n.midi]), measure: physicalMeasure });
         }
       });
     });
     chords.sort((a,b) => a.timeMs - b.timeMs);
     practiceChordsRef.current = chords;
     
-    const idx = chords.findIndex(c => c.timeMs >= positionMs);
-    targetChordIndexRef.current = idx !== -1 ? idx : -1;
-  }, [parsedMidi, practiceTrackId]); 
+    // Update target index based on position later; initialize cleanly to prevent referencing before declaration:
+    targetChordIndexRef.current = 0;
+  }, [parsedMidi, practiceTrackId, getMeasureForTime]); 
 
   // Synchronize global mute to prevent backing track or synth leaking during MIDI Wait Mode brakes
   useEffect(() => {
@@ -324,6 +366,54 @@ export function PlayShell({
     return tracks;
   }, [payload.audioTracks, scoreFileId, payload.metadata]);
 
+  // Relocate Playback Handlers ABOVE the Audio Load Effect to satisfy strict scoping logic
+  const handlePlay = useCallback(async () => {
+    try {
+      if (audioManagerRef.current) {
+        audioManagerRef.current.unlockiOSAudio();
+      }
+      const globalTone = (window as any).Tone;
+      if (globalTone && globalTone.context && globalTone.context.state === 'suspended') {
+         globalTone.context.resume();
+      }
+    } catch (e) { 
+      console.warn("iOS Resume bypass failed", e); 
+    }
+
+    let playPromises: Promise<void>[] = [];
+    if (midiTimeoutRef.current) clearTimeout(midiTimeoutRef.current);
+
+    if (midiPlayerRef.current && stretchedMidiBase64 && !payload.metadata?.scoreSynthMuted) {
+      const offsetMs = payload.metadata?.scoreSynthOffsetMs || 0;
+      const targetTimeSecs = (positionMs - offsetMs + midiStartOffsetMs) / 1000;
+      
+      if (targetTimeSecs >= 0) {
+        midiPlayerRef.current.currentTime = targetTimeSecs;
+        playPromises.push(Promise.resolve(midiPlayerRef.current.start()).catch((e:any) => console.error(e)));
+      } else {
+        midiPlayerRef.current.currentTime = 0; 
+        const delayMs = -targetTimeSecs * 1000;
+        midiTimeoutRef.current = setTimeout(() => {
+          if (isPlayingRef.current && !payload.metadata?.scoreSynthMuted) {
+             Promise.resolve(midiPlayerRef.current.start()).catch(e => console.error(e));
+          }
+        }, delayMs);
+      }
+    }
+    if (audioManagerRef.current && payload.audioTracks.length > 0) {
+      playPromises.push(Promise.resolve(audioManagerRef.current.play()).catch((e:any) => console.error(e)));
+    }
+    
+    if (payload.audioTracks.length === 0) {
+      midiPlayStartTimeRef.current = performance.now();
+      midiPlayStartPosRef.current = positionMs;
+    }
+
+    await Promise.allSettled(playPromises);
+    setIsPlaying(true);
+    isPlayingRef.current = true;
+  }, [payload.audioTracks.length, stretchedMidiBase64, payload.metadata?.scoreSynthMuted, positionMs, midiStartOffsetMs, payload.metadata?.scoreSynthOffsetMs]);
+
   // Load Audio Tracks
   useEffect(() => {
     if (!audioManagerRef.current) return;
@@ -363,7 +453,7 @@ export function PlayShell({
         }
       }
     });
-  }, [payload.audioTracks]);
+  }, [payload.audioTracks, autoplayOnLoad, handlePlay, muteByTrackId, soloByTrackId, volumes]);
 
   const isPlayingRef = useRef(isPlaying);
   useEffect(() => {
@@ -407,9 +497,9 @@ export function PlayShell({
     let maxMidi = midiDurationMs || 0;
     
     let maxTimemap = 0;
-    const timemap = payload.notationData?.timemap;
-    if (timemap && timemap.length > 0) {
-       const lastMap = timemap[timemap.length - 1];
+    const timemapArr = payload.notationData?.timemap;
+    if (timemapArr && timemapArr.length > 0) {
+       const lastMap = timemapArr[timemapArr.length - 1];
        const bpm = payload.metadata?.tempo || 120;
        const ts = payload.metadata?.timeSignature || "4/4";
        const [numStr, denStr] = ts.split("/");
@@ -434,10 +524,20 @@ export function PlayShell({
         const targetChord = practiceChordsRef.current[targetChordIndexRef.current];
         currentPos = targetChord.timeMs; // STATIC LOCK! NO AUTO-RUN!
             
+        // CRITICAL FIX: Only apply Audio-to-Sheet Offset (offsetMs) implicitly when a physical playback engine runs.
+        // Wait Mode directly targets the exact unmutated mathematical array offline. If we inject the database audio offset, Verovio's SVG matrix dynamically falls multiple measures behind ToneJs targets globally!
+        let roundedPos = Math.round(currentPos);
+
+        setPositionMs(prev => {
+          if (prev === roundedPos) return prev;
+          return roundedPos;
+        });
+            
         const pressed = activeNotesRef.current;
         
         // Wait Mode Diagnostic Monitor DOM Injection (60fps lock)
         if (showWaitModeMonitor && waitModeMonitorRef.current) {
+          // Target Chords (Red mapping bounds representing chronological measure coordinates natively)
           const MIDI_NOTES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
           const toPitch = (midi: number) => `${MIDI_NOTES[midi % 12]}${Math.floor(midi / 12) - 1}`;
           
@@ -450,7 +550,7 @@ export function PlayShell({
               <span>Target Index:</span> <span style="font-family:monospace">${targetChordIndexRef.current} / ${practiceChordsRef.current.length}</span>
             </div>
             <div style="display:flex; justify-content: space-between;">
-              <span style="color:#ef4444;">Required:</span> <span style="font-family:monospace; font-weight:bold;">[${targets || 'None'}]</span>
+              <span style="color:#ef4444;">Required:</span> <span style="font-family:monospace; font-weight:bold;">[${targets || 'None'}] ${targetChord.measure ? `<span style="color:#a1a1aa; font-size: 10px; margin-left: 4px;">(Measure ${targetChord.measure})</span>` : ''}</span>
             </div>
             <div style="display:flex; justify-content: space-between;">
               <span style="color:#10b981;">Pressed:</span> <span style="font-family:monospace; font-weight:bold;">[${actives || 'None'}]</span>
@@ -614,57 +714,7 @@ export function PlayShell({
   }, [isPlaying, updatePosition]);
 
 
-  // Audio Actions
-  const handlePlay = useCallback(async () => {
-    // FORCE iOS AUDIO CONTEXT RESUME SYNCHRONOUSLY
-    try {
-      if (audioManagerRef.current) {
-        audioManagerRef.current.unlockiOSAudio();
-      }
-      
-      // Also force Web Component Tone.js resume for the MIDI player fallback
-      const globalTone = (window as any).Tone;
-      if (globalTone && globalTone.context && globalTone.context.state === 'suspended') {
-        globalTone.context.resume();
-      }
-    } catch (e) { 
-      console.warn("iOS Resume bypass failed", e); 
-    }
-
-    let playPromises: Promise<void>[] = [];
-    if (midiTimeoutRef.current) clearTimeout(midiTimeoutRef.current);
-
-    if (midiPlayerRef.current && stretchedMidiBase64 && !payload.metadata?.scoreSynthMuted) {
-      const offsetMs = payload.metadata?.scoreSynthOffsetMs || 0;
-      const targetTimeSecs = (positionMs - offsetMs + midiStartOffsetMs) / 1000;
-      
-      if (targetTimeSecs >= 0) {
-        midiPlayerRef.current.currentTime = targetTimeSecs;
-        playPromises.push(Promise.resolve(midiPlayerRef.current.start()).catch((e:any) => console.error(e)));
-      } else {
-        midiPlayerRef.current.currentTime = 0; 
-        const delayMs = -targetTimeSecs * 1000;
-        midiTimeoutRef.current = setTimeout(() => {
-          if (isPlayingRef.current && !payload.metadata?.scoreSynthMuted) {
-             Promise.resolve(midiPlayerRef.current.start()).catch(e => console.error(e));
-          }
-        }, delayMs);
-      }
-    }
-    if (audioManagerRef.current && payload.audioTracks.length > 0) {
-      playPromises.push(Promise.resolve(audioManagerRef.current.play()).catch((e:any) => console.error(e)));
-    }
-    
-    // Capture accurate Start Times for Smooth MIDI Telemetry Interpolation Tracker
-    if (payload.audioTracks.length === 0) {
-      midiPlayStartTimeRef.current = performance.now();
-      midiPlayStartPosRef.current = positionMs;
-    }
-
-    await Promise.allSettled(playPromises);
-    setIsPlaying(true);
-    isPlayingRef.current = true;
-  }, [payload.audioTracks.length, stretchedMidiBase64, payload.metadata?.scoreSynthMuted, positionMs, midiStartOffsetMs, payload.metadata?.scoreSynthOffsetMs]);
+  // (handlePlay was hoisted securely above the Loading Loop dependencies)
 
   const handlePause = useCallback(() => {
     setIsPlaying(false);

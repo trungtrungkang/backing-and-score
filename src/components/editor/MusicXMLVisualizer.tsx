@@ -111,12 +111,83 @@ export function MusicXMLVisualizer({
         await proxy.onRuntimeInitialized();
         if (canceled) return;
 
-        // Use verovio-editor's responsive pattern:
-        // pageWidth = container.clientWidth * (100 / scale)
-        // This makes Verovio output an SVG that already matches the container.
+        // Fix Sibelius 2/4 Whole Rest export bug via Strict DOM Traversal
+        const parser = new DOMParser();
+        const baseXmlDoc = parser.parseFromString(text, 'text/xml');
+
+        // Apply the Whole Rest Fix GLOBALLY so BOTH Visual and MIDI Timemaps synchronize exactly to 3-beat measures natively!
+        const baseNotes = baseXmlDoc.getElementsByTagName('note');
+        for (let i = 0; i < baseNotes.length; i++) {
+          const noteNode = baseNotes[i];
+          const restElements = noteNode.getElementsByTagName('rest');
+          const hasRest = restElements.length > 0;
+          if (hasRest) {
+            const types = noteNode.getElementsByTagName('type');
+            if (types.length > 0 && types[0].textContent === 'whole') {
+              restElements[0].setAttribute("measure", "yes");
+              noteNode.removeChild(types[0]);
+            }
+          }
+        }
+
+        // 2. Prevent Verovio VLV Timestamp Cascades by Stripping Corrupt Sibelius <pedal> Tags.
+        const directions = baseXmlDoc.getElementsByTagName('direction');
+        for (let i = directions.length - 1; i >= 0; i--) {
+          const dir = directions[i];
+          if (dir.getElementsByTagName('pedal').length > 0) {
+             dir.parentNode?.removeChild(dir);
+          }
+        }
+        
+        // 3. Purge infinite <tie> anomalies specifically isolating unclosed boundaries circumventing VLV overflows while retaining valid sustains natively
+        const openTies: Record<string, Element[]> = {};
+        const baseMeasures = baseXmlDoc.getElementsByTagName('measure');
+        // Sequentially validate tied note pairs across all boundaries natively
+        for (let i = 0; i < baseMeasures.length; i++) {
+            const measure = baseMeasures[i];
+            const mNotes = measure.getElementsByTagName('note');
+            for (let j = 0; j < mNotes.length; j++) {
+                const note = mNotes[j];
+                const pitch = note.getElementsByTagName('pitch')[0];
+                if (!pitch) continue;
+                
+                const step = pitch.getElementsByTagName('step')[0]?.textContent || '';
+                const alter = pitch.getElementsByTagName('alter')[0]?.textContent || '';
+                const octave = pitch.getElementsByTagName('octave')[0]?.textContent || '';
+                const key = `${step}${alter}${octave}`;
+                
+                const noteTies = note.getElementsByTagName('tie');
+                for (let k = noteTies.length - 1; k >= 0; k--) {
+                    const tie = noteTies[k];
+                    const tieType = tie.getAttribute('type');
+                    if (tieType === 'start') {
+                        if (!openTies[key]) openTies[key] = [];
+                        openTies[key].push(tie);
+                    } else if (tieType === 'stop') {
+                        if (openTies[key] && openTies[key].length > 0) {
+                            openTies[key].pop(); // Successfully closed
+                        } else {
+                            tie.parentNode?.removeChild(tie); // Malformed stop without start natively
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Final Sweep: Purge any trailing unclosed 'start' ties triggering infinite VLV extrapolations globally!
+        for (const key of Object.keys(openTies)) {
+            for (const tie of openTies[key]) {
+                tie.parentNode?.removeChild(tie);
+            }
+        }
+
+        const serializer = new XMLSerializer();
+        const safeSvgText = serializer.serializeToString(baseXmlDoc);
+
+        // Load correct mathematical timings natively into the SVG Engine
         const containerWidth = svgContainerRef.current?.clientWidth ?? 800;
         await proxy.setOptions({
-          pageHeight: 60000, // very tall virtual page — all measures on one page
+          pageHeight: 60000, 
           pageWidth: Math.round(containerWidth * (100 / scale)),
           pageMarginLeft: 50,
           pageMarginRight: 50,
@@ -128,17 +199,13 @@ export function MusicXMLVisualizer({
         });
         if (canceled) return;
 
-        // Load data into toolkit
-        await proxy.loadData(text);
+        await proxy.loadData(safeSvgText);
         if (canceled) return;
 
-        // Render the single continuous page SVG (Verovio is configured with auto breaks and adjusted height)
         const svg = await proxy.renderToSVG(1);
         if (canceled) return;
 
         // --- ISOLATED MIDI GENERATION THREAD ---
-        // Spawn a completely temporary, secondary Web Worker exclusively for MIDI extraction.
-        // This guarantees that the main SVG UI worker is NEVER polluted by our aggressive XML mutations!
         const midiWorkerUrl = "/dist/verovio/verovio-worker.js";
         const midiWorker = new Worker(midiWorkerUrl);
         midiWorker.postMessage({
@@ -147,25 +214,14 @@ export function MusicXMLVisualizer({
         const midiProxy = new VerovioWorkerProxy(midiWorker) as unknown as IVerovioWorkerProxy;
         await midiProxy.onRuntimeInitialized();
         if (canceled) return;
+        
+        // Clone the globally cleansed core document for explicit accidental modulation strictly for MIDI engine overrides natively
+        const midiXmlDoc = parser.parseFromString(safeSvgText, 'text/xml');
 
-        // Fix Sibelius 2/4 Whole Rest export bug AND Verovio Key Signature Modulation bug via Strict DOM Traversal
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(text, 'text/xml');
-
-        const notes = xmlDoc.getElementsByTagName('note');
-        for (let i = 0; i < notes.length; i++) {
-          const noteNode = notes[i];
-          
-          // 1. Whole Rest Fix
-          const hasRest = noteNode.getElementsByTagName('rest').length > 0;
-          if (hasRest) {
-            const types = noteNode.getElementsByTagName('type');
-            if (types.length > 0 && types[0].textContent === 'whole') {
-              noteNode.removeChild(types[0]);
-            }
-          }
-
-          // 2. Accidental Modulation Fix (Strictly ordered insertion)
+        // 4. Accidental Modulation Fix (Strictly ordered insertion for MIDI compilation preventing enharmonic flattening skips)
+        const midiNotes = midiXmlDoc.getElementsByTagName('note');
+        for (let i = 0; i < midiNotes.length; i++) {
+          const noteNode = midiNotes[i];
           const pitch = noteNode.getElementsByTagName('pitch')[0];
           const ExistingAccidental = noteNode.getElementsByTagName('accidental');
           if (pitch && ExistingAccidental.length === 0) {
@@ -178,7 +234,7 @@ export function MusicXMLVisualizer({
                else if (val === '-2') accType = 'flat-flat';
                else if (val === '2') accType = 'double-sharp';
             }
-            const accNode = xmlDoc.createElement('accidental');
+            const accNode = midiXmlDoc.createElement('accidental');
             accNode.textContent = accType;
 
             const timeMod = noteNode.getElementsByTagName('time-modification')[0];
@@ -195,37 +251,24 @@ export function MusicXMLVisualizer({
             noteNode.insertBefore(accNode, anchor);
           }
         }
-
-        // 3. Prevent Verovio VLV Timestamp Cascades by Stripping Corrupt Sibelius <pedal> Tags.
-        const directions = xmlDoc.getElementsByTagName('direction');
-        for (let i = directions.length - 1; i >= 0; i--) {
-          const dir = directions[i];
-          if (dir.getElementsByTagName('pedal').length > 0) {
-             dir.parentNode?.removeChild(dir);
-          }
-        }
         
-        const serializer = new XMLSerializer();
-        const safeMidiText = serializer.serializeToString(xmlDoc);
-
+        const safeMidiText = serializer.serializeToString(midiXmlDoc);
         await midiProxy.loadData(safeMidiText);
+        
         let midiStr = '';
         if (!canceled) {
           midiStr = await midiProxy.renderToMIDI();
           if (!midiStr || midiStr.trim() === '') {
-             console.error("[MusicXML] FATAL: DOMParser compilation generated an illegal XSD layout! Verovio renderToMIDI() aborted to '' string, muting output!");
-             // Fallback bypass: Feed the unaltered original string text so users don't lose physical Audio tracks globally!
-             await midiProxy.loadData(text);
+             console.error("[MusicXML] FATAL: DOMParser compilation generated an illegal XSD layout!");
+             await midiProxy.loadData(safeSvgText);
              midiStr = await midiProxy.renderToMIDI();
           }
-          
           if (midiStr) {
              onMidiExtracted?.('data:audio/midi;base64,' + midiStr);
           }
         }
-        midiWorker.terminate(); // Destroy the disposable worker immediately!
+        midiWorker.terminate(); 
 
-        if (canceled) return;
         if (canceled) return;
 
         svgContentRef.current = svg;
@@ -499,7 +542,7 @@ export function MusicXMLVisualizer({
     // In Normal Mode, the mathematical timeline interpolation engine guarantees perfect highlight/scroll sync natively.
     const isActuallyWaitMode = document.getElementById("musicxml-container")?.classList.contains("wait-mode-active");
     if (!isActuallyWaitMode) return;
-    
+
     const activeNodes = container.querySelectorAll(".wait-mode-missed, .note-playing-correct");
     if (activeNodes.length === 0) return;
 
@@ -562,11 +605,25 @@ export function MusicXMLVisualizer({
               const el = container.querySelector("#" + notes[i]) as SVGGraphicsElement | null;
               if (!el || el.classList.contains("wait-mode-missed")) continue;
 
+              const staffNode = el.closest('.staff');
+              if (staffNode && typeof practiceTrackId === 'number' && practiceTrackId >= 0) {
+                let staffN = 1;
+                const measureNode = staffNode.closest('.measure');
+                if (measureNode) {
+                  const staves = Array.from(measureNode.querySelectorAll('.staff'));
+                  staffN = staves.indexOf(staffNode as Element) + 1;
+                } else {
+                  staffN = parseInt(staffNode.getAttribute('n') || "1", 10);
+                }
+
+                if (staffN !== practiceTrackId + 1) continue;
+              }
+
               try {
                 const bbox = el.getBBox();
                 if (targetX === -1) {
                   targetX = bbox.x;
-                } else if (targetX - bbox.x > 35) {
+                } else if (targetX - bbox.x > 75) {
                   break; // INSTANT ABORT. We are officially evaluating the previous discrete hit. 0 layout thrashing!
                 }
               } catch (e) { }
@@ -591,7 +648,7 @@ export function MusicXMLVisualizer({
       workerProxyRef.current.getElementsAtTime(qPos + 5).then((data: any) => {
         const notes = data?.notes || [];
         container.querySelectorAll(".wait-mode-missed").forEach(el => el.classList.remove("wait-mode-missed"));
-        
+
         // CRITICAL FIX: Purge stale transit-window Blue classes! Overrides Red targets natively through CSS specificity cascades.
         container.querySelectorAll(".note-playing-correct").forEach(el => el.classList.remove("note-playing-correct"));
 
@@ -609,10 +666,17 @@ export function MusicXMLVisualizer({
             if (!el) continue;
 
             const staffNode = el.closest('.staff');
-            if (staffNode && typeof practiceTrackId === 'number') {
-              const staffN = parseInt(staffNode.getAttribute('n') || "1", 10);
-              if (practiceTrackId === 0 && staffN !== 1) continue;
-              if (practiceTrackId === 1 && staffN < 2) continue;
+            if (staffNode && typeof practiceTrackId === 'number' && practiceTrackId >= 0) {
+              let staffN = 1;
+              const measureNode = staffNode.closest('.measure');
+              if (measureNode) {
+                const staves = Array.from(measureNode.querySelectorAll('.staff'));
+                staffN = staves.indexOf(staffNode as Element) + 1;
+              } else {
+                staffN = parseInt(staffNode.getAttribute('n') || "1", 10);
+              }
+
+              if (staffN !== practiceTrackId + 1) continue;
             }
 
             try {
