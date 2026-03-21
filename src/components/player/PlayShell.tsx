@@ -43,6 +43,7 @@ export function PlayShell({
   autoplayOnLoad
 }: PlayShellProps) {
   const audioManagerRef = useRef<AudioManager | null>(null);
+  const endOfTrackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { resolvedTheme } = useTheme();
   const isDarkMode = resolvedTheme === "dark" || resolvedTheme === "system";
 
@@ -524,21 +525,37 @@ export function PlayShell({
         }
     } else {
         // Standard Playback Smooth Math Engine
+        const now = performance.now();
         if (payload.audioTracks.length === 0 && midiPlayerRef.current) {
-            const elapsedMs = performance.now() - midiPlayStartTimeRef.current;
+            // CRITICAL FIX: DO NOT TRUST `midiPlayerRef.current.currentTime` natively! Magenta Web Components intrinsically zero their playback clock synchronously the moment the underlying MIDI buffer exhausts. By intercepting raw playback metrics directly off `performance.now()`, we isolate continuous timeline stability immune to arbitrary hardware stream rewinds.
+            const elapsedMs = now - midiPlayStartTimeRef.current;
             currentPos = Math.max(0, midiPlayStartPosRef.current + (elapsedMs * playbackRate));
         } else if (audioManagerRef.current) {
             currentPos = audioManagerRef.current.getCurrentPositionMs();
         }
     }
 
+    // --- WAIT MODE INTERCEPTOR ---
     // Auto-Stop Tripwire
     if (totalSongDurationMs > 0 && currentPos > totalSongDurationMs) {
+      if (isWaitModeRef.current) {
+        // Wait Mode Completion Celebrate phase: DO NOT rewind aggressively right as the user hits the last chord!
+        if (!endOfTrackTimeoutRef.current) {
+           endOfTrackTimeoutRef.current = setTimeout(() => {
+              handleStop();
+              endOfTrackTimeoutRef.current = null;
+              if (isAutoplayEnabled && onNext) {
+                 onNext();
+              }
+           }, 2500); // 2.5 second victory lap delay
+        }
+        return; // Suspend clock tracking safely.
+      }
+
       handleStop();
       
       // Auto-Advance logic
       if (isAutoplayEnabled && onNext) {
-         // Break out of strict execution loop to allow React unmount
          setTimeout(() => {
             onNext();
          }, 50);
@@ -623,6 +640,11 @@ export function PlayShell({
 
   const handlePause = useCallback(() => {
     if (midiTimeoutRef.current) clearTimeout(midiTimeoutRef.current);
+    if (endOfTrackTimeoutRef.current) {
+       clearTimeout(endOfTrackTimeoutRef.current);
+       endOfTrackTimeoutRef.current = null;
+    }
+
     if (midiPlayerRef.current) {
       midiPlayerRef.current.stop(); // html-midi-player doesn't have pause(), stop() pauses it.
     }
@@ -710,7 +732,7 @@ export function PlayShell({
     const startOfMeasureMs = currentMeasureIndex * measureMs;
     
     // Complete hard-reset if stopping at the absolute extreme bounds of the track
-    if (positionMs - startOfMeasureMs < 150 || positionMs >= totalSongDurationMs - 100) {
+    if (positionMs - startOfMeasureMs < 150 || positionMs >= totalSongDurationMs - 1500) {
       targetChordIndexRef.current = 0; // Aggressive React-independent lock
       handleSeek(0);
     } else {

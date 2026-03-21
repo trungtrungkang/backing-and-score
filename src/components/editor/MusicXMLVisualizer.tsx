@@ -233,6 +233,7 @@ export function MusicXMLVisualizer({
 
   // --- Magic Sync: Highlight & Auto-scroll ---
   const activeMeasureRef = useRef<number | null>(null);
+  const prevIsWaitModeRef = useRef<boolean>(isWaitMode);
   const scrollTargetRef = useRef<Element | null>(null);
 
   const highlightMeasure = (measureEl: Element | null, shouldScroll: boolean) => {
@@ -330,9 +331,10 @@ export function MusicXMLVisualizer({
       const measureEl = measuresCacheRef.current[physicalIndex - 1] as SVGGElement | undefined;
 
       if (measureEl) {
-        // Highlight active entire measure box
-        if (currentEvent.measure !== activeMeasureRef.current) {
+        // Highlight active entire measure box (Force DOM flush if Wait Mode actively mutates)
+        if (currentEvent.measure !== activeMeasureRef.current || prevIsWaitModeRef.current !== isWaitMode) {
           activeMeasureRef.current = currentEvent.measure;
+          prevIsWaitModeRef.current = isWaitMode;
           highlightMeasure(measureEl, isPlaying);
         }
 
@@ -399,7 +401,7 @@ export function MusicXMLVisualizer({
       activeMeasureRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positionMs, isPlaying, timemap, measureMap, renderVersion]);
+  }, [positionMs, isPlaying, timemap, measureMap, renderVersion, isWaitMode]);
 
   // Handle clicking on measures to seek
   const handleSvgClick = (e: React.MouseEvent<HTMLDivElement>) => {
