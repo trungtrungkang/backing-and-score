@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "next lint",
     "setup:appwrite": "node scripts/setup-appwrite-database.mjs",
-    "setup:appwrite:v2": "node scripts/setup-appwrite-v2.mjs"
+    "setup:appwrite:v2": "node scripts/setup-appwrite-v2.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -39,16 +41,22 @@
     "verovio": "^6.1.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
     "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "^16.1.6",
+    "jsdom": "^29.0.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "tailwindcss-animate": "^1.0.7",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.0"
   }
 }

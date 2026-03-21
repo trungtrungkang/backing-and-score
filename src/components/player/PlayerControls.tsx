@@ -52,7 +52,7 @@ interface PlayerControlsProps {
   onWaitModeMonitorToggle?: (show: boolean) => void;
 }
 
-function formatTime(ms: number) {
+export function formatTime(ms: number) {
   const totalSeconds = Math.floor(ms / 1000);
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
@@ -190,6 +190,7 @@ export function PlayerControls({
             <button
               onClick={isPlaying ? onPause : onPlay}
               className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.4)] transition-all hover:scale-105 active:scale-95"
+              title={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current translate-x-0.5" />}
             </button>
